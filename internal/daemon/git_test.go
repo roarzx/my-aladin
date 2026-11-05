@@ -43,6 +43,9 @@ func setupOrigin(t *testing.T) string {
 	}
 	commitIn(t, seed, "init")
 	gitCmd(t, seed, "push", "origin", "HEAD:main")
+	// 不同平台 init 的默认分支不同（main/master）；显式设置远端 HEAD，
+	// 否则 Linux 上 clone 会得到空仓库（HEAD 指向不存在的分支）。
+	gitCmd(t, origin, "symbolic-ref", "HEAD", "refs/heads/main")
 	return origin
 }
 
