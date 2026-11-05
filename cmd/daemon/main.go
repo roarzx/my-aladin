@@ -13,6 +13,16 @@ import (
 )
 
 func main() {
+	// 作为 janitor 子进程启动（由 StartJanitor 通过环境变量触发）。
+	if dir := os.Getenv("ALADDIN_JANITOR_DIR"); dir != "" {
+		pipe := os.NewFile(uintptr(3), "janitor-pipe")
+		if err := daemon.RunJanitor(dir, pipe); err != nil {
+			fmt.Fprintln(os.Stderr, "janitor:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	var opts daemon.Options
 	flag.StringVar(&opts.Profile, "profile", "default", "profile 名称（对应 <profile_dir>/<profile>/）")
 	flag.StringVar(&opts.ConfigPath, "config", "config/config.yaml", "配置文件路径")

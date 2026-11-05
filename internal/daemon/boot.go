@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/roarzx/my-aladin/internal/buildinfo"
@@ -43,6 +44,31 @@ func Run(ctx context.Context, opts Options) error {
 		return errors.New("ALADDIN_MACHINE_TOKEN: 未设置（机器令牌见 9.5.1）")
 	}
 
+	idempotent, err := OpenIdempotentStore(filepath.Join(profile.Dir, "commands.jsonl"), 24*time.Hour)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = idempotent.Close() }()
+
+	sessionStore, err := OpenSessionStore(filepath.Join(profile.Dir, "session_history.json"))
+	if err != nil {
+		return err
+	}
+
+	reaper, err := NewReaper(profile.Dir)
+	if err != nil {
+		return err
+	}
+	janitor, err := StartJanitor(profile.Dir)
+	if err != nil {
+		return err
+	}
+	// LIFO：先 StopAll 子进程，再关闭 janitor 管道。
+	defer janitor.Stop()
+	defer func() { _ = reaper.StopAll() }()
+
+	dispatcher := NewDispatcher(idempotent, nil, slog.Default())
+
 	client := NewClient(ClientOptions{
 		ACPURL:            cfg.Daemon.ACPURL,
 		MachineID:         profile.MachineID,
@@ -52,6 +78,7 @@ func Run(ctx context.Context, opts Options) error {
 		HeartbeatTimeout:  cfg.Server.HeartbeatTimeout.Std(),
 		MaxMessageBytes:   cfg.ACP.MaxMessageBytes,
 		Backoff:           Backoff{Base: 500 * time.Millisecond, Max: 30 * time.Second},
+		OnCommand:         dispatcher.Handle,
 	})
 
 	slog.Info("daemon 启动",
@@ -60,6 +87,8 @@ func Run(ctx context.Context, opts Options) error {
 		"profile_dir", profile.Dir,
 		"machine", profile.MachineID,
 		"acp_url", cfg.Daemon.ACPURL,
+		"known_commands", idempotent.Len(),
+		"known_sessions", sessionStore.Len(),
 	)
 
 	if err := client.Run(ctx); err != nil {

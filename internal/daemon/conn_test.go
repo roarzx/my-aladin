@@ -137,6 +137,26 @@ func TestClientStopsWhenRejected(t *testing.T) {
 	}
 }
 
+func TestClientStopsOnContextCancel(t *testing.T) {
+	srv := fakeserver.New(t, fakeserver.Options{Token: "t"})
+	client := testClient(srv.URL(), "t", time.Hour, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- client.Run(ctx) }()
+	srv.WaitConnected(t, 2*time.Second)
+
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("期望 context.Canceled，实际: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ctx 取消后客户端未及时退出")
+	}
+}
+
 func TestClientRespondsToCommand(t *testing.T) {
 	handler := func(_ context.Context, env protocol.Envelope) (protocol.ResponsePayload, error) {
 		data, _ := json.Marshal(map[string]string{"echo": env.ID})

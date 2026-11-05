@@ -114,6 +114,11 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	// ctx 取消时关闭连接，唤醒阻塞中的 Read（否则要等心跳超时才退出）。
+	go func() {
+		<-runCtx.Done()
+		_ = conn.Close()
+	}()
 	go c.heartbeat(runCtx, writer)
 
 	for {
