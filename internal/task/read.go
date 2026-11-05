@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -107,4 +108,29 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		"plan":       plan,
 		"acceptance": nil,
 	})
+}
+
+// List 处理 GET /issues：列出当前用户可见的任务（驾驶舱首页）。
+func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+	actor, ok := auth.ActorFrom(r.Context())
+	if !ok {
+		httpapi.Fail(w, errcode.New(errcode.Unauthenticated, "未认证"))
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	tasks, err := mysqlstore.ListTasksForUser(r.Context(), h.DB, actor.UserID, limit)
+	if err != nil {
+		httpapi.Fail(w, errcode.New(errcode.UpstreamUnavailable, "读取任务列表失败"))
+		return
+	}
+	out := make([]taskView, 0, len(tasks))
+	for _, task := range tasks {
+		out = append(out, taskView{
+			ID: task.ID, WorkspaceID: task.WorkspaceID, Name: task.Name,
+			Mode: string(task.Mode), Status: string(task.Status), Version: task.Version,
+			PlanBranch: task.PlanBranch, CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
+			CancelAt: task.CancelRequestedAt,
+		})
+	}
+	httpapi.JSON(w, http.StatusOK, map[string]any{"data": out})
 }

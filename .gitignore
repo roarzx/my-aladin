@@ -13,6 +13,7 @@ config/config.local.yaml
 
 # 前端
 node_modules/
+*.tsbuildinfo
 web/dist/
 web/.vite/
 

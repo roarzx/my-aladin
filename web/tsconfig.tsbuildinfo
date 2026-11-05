@@ -1,1 +1,0 @@
-{"root":["./src/main.tsx","./src/vite-env.d.ts","./src/api/issues.ts","./src/hooks/useeventstream.ts","./src/pages/issuecockpit.test.tsx","./src/pages/issuecockpit.tsx","./src/test/setup.ts","./vite.config.ts"],"version":"5.9.3"}

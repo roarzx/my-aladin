@@ -196,6 +196,7 @@ func run(cfgPath string) error {
 			})
 		},
 		RegisterGlobal: func(r chi.Router) {
+			r.Get("/issues", taskHandler.List)
 			r.Get("/issues/{id}", taskHandler.Get)
 			r.Get("/issues/{id}/plans/{rev}", planHandler.Get)
 			r.Post("/issues/{id}/plans", planHandler.Submit)

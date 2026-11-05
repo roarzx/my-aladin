@@ -107,7 +107,19 @@ export default function IssueCockpit({
   if (loadError && !detail) {
     return (
       <main className="cockpit" aria-label="Issue 驾驶舱">
-        <p role="alert">加载失败：{loadError}</p>
+        <nav className="crumbs">
+          <a href="/">← 任务列表</a>
+        </nav>
+        <p role="alert" className="error">加载失败：{loadError}</p>
+        <button
+          type="button"
+          onClick={() => {
+            localStorage.removeItem('aladdin_token')
+            window.location.reload()
+          }}
+        >
+          重新设置令牌
+        </button>
       </main>
     )
   }
@@ -125,6 +137,9 @@ export default function IssueCockpit({
 
   return (
     <main className="cockpit" aria-label="Issue 驾驶舱">
+      <nav className="crumbs">
+        <a href="/">← 任务列表</a>
+      </nav>
       <header>
         <h1>{task.name}</h1>
         <p>

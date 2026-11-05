@@ -81,9 +81,15 @@ export class ApiError extends Error {
 }
 
 const API_BASE: string = import.meta.env.VITE_API_BASE ?? ''
+// 本地开发：`web/.env.development` 提供 VITE_DEV_TOKEN，免去手动设置 localStorage。
+const DEV_TOKEN: string = import.meta.env.VITE_DEV_TOKEN ?? ''
+
+export function currentToken(): string {
+  return localStorage.getItem('aladdin_token') || DEV_TOKEN
+}
 
 function authHeaders(): Record<string, string> {
-  const token = localStorage.getItem('aladdin_token')
+  const token = currentToken()
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
@@ -102,6 +108,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(err?.code ?? `HTTP_${res.status}`, err?.message ?? res.statusText)
   }
   return body.data as T
+}
+
+export function fetchIssues(limit = 50): Promise<Task[]> {
+  return request<Task[]>(`/issues?limit=${limit}`)
 }
 
 export function fetchIssue(taskId: string): Promise<IssueDetail> {
