@@ -2023,7 +2023,7 @@ CREATE TABLE flow_node_runs (
   run_id       CHAR(36) NOT NULL,
   node_key     VARCHAR(64) NOT NULL,         -- environment_prepare / mars_acceptance / agent_prompt
   ordinal      INT UNSIGNED NOT NULL,
-  status       ENUM('pending','executing','completed','failed','skipped') NOT NULL DEFAULT 'pending',
+  status       ENUM('pending','executing','completed','failed','skipped','stale') NOT NULL DEFAULT 'pending',
   attempt_no   INT UNSIGNED NOT NULL DEFAULT 1,
   lease_owner  CHAR(36) NULL,
   lease_epoch  BIGINT UNSIGNED NOT NULL DEFAULT 1,
@@ -2033,6 +2033,15 @@ CREATE TABLE flow_node_runs (
 );
 
 -- ============ 交接 ============
+CREATE TABLE external_requirements (
+  source     VARCHAR(32) NOT NULL,
+  url        TEXT NOT NULL,
+  url_hash   CHAR(64) NOT NULL,
+  task_id    CHAR(36) NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (source, url_hash)
+);
+
 CREATE TABLE handoffs (
   id          CHAR(36) PRIMARY KEY,
   task_id     CHAR(36) NOT NULL,
