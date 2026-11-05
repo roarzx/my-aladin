@@ -88,6 +88,8 @@ type StorageConfig struct {
 type SecurityConfig struct {
 	MachineTokenTTL Duration `yaml:"machine_token_ttl"`
 	LogRedaction    bool     `yaml:"log_redaction"`
+	// AdminUserID 是工作区管理令牌对应的用户（v1 最小认证方案，见 9.5.1）。
+	AdminUserID uint64 `yaml:"admin_user_id"`
 }
 
 type DaemonConfig struct {
@@ -128,6 +130,7 @@ func Default() *Config {
 		Security: SecurityConfig{
 			MachineTokenTTL: Duration(24 * time.Hour),
 			LogRedaction:    true,
+			AdminUserID:     1,
 		},
 		Daemon: DaemonConfig{
 			ProfileDir: "~/.aladdin/profiles",

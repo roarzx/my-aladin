@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,13 +14,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/roarzx/my-aladin/internal/auth"
 	"github.com/roarzx/my-aladin/internal/buildinfo"
 	"github.com/roarzx/my-aladin/internal/config"
 	"github.com/roarzx/my-aladin/internal/health"
+	"github.com/roarzx/my-aladin/internal/httpapi"
+	mysqlstore "github.com/roarzx/my-aladin/internal/store/mysql"
 	"github.com/roarzx/my-aladin/migrations"
 )
 
@@ -77,22 +78,37 @@ func run(cfgPath string) error {
 		health.Redis(rdb),
 	)
 
-	router := chi.NewRouter()
-	router.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
-	router.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
+	healthHandler := func(w http.ResponseWriter, _ *http.Request) {
+		httpapi.JSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}
+	readyHandler := func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 		details := checker.Details(ctx)
 		if len(details) > 0 {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			httpapi.JSON(w, http.StatusServiceUnavailable, map[string]any{
 				"status": "unavailable",
 				"errors": details,
 			})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+		httpapi.JSON(w, http.StatusOK, map[string]string{"status": "ready"})
+	}
+
+	authenticator := auth.StaticToken{
+		Token:  os.Getenv("ALADDIN_ADMIN_TOKEN"),
+		UserID: cfg.Security.AdminUserID,
+	}
+	if authenticator.Token == "" {
+		slog.Warn("ALADDIN_ADMIN_TOKEN 未设置：业务接口将全部返回 401")
+	}
+
+	router := httpapi.New(httpapi.Deps{
+		Authenticator: authenticator,
+		Members:       &mysqlstore.WorkspaceStore{DB: db},
+		Logger:        slog.Default(),
+		Health:        healthHandler,
+		Ready:         readyHandler,
 	})
 
 	srv := &http.Server{
@@ -128,10 +144,4 @@ func run(cfgPath string) error {
 		return fmt.Errorf("优雅关闭: %w", err)
 	}
 	return nil
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
 }

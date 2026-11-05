@@ -25,6 +25,7 @@ storage:
 security:
   machine_token_ttl: 24h
   log_redaction: true
+  admin_user_id: 1
 
 daemon:
   server_url: "${ALADDIN_SERVER_URL}"
