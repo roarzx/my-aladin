@@ -1,14 +1,16 @@
 package acp
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 	"time"
 
@@ -87,8 +89,40 @@ func TestStartAndPrompt(t *testing.T) {
 	if events[1].Kind != agentevent.KindToolCall || events[1].ToolCallID != "t1" {
 		t.Fatalf("事件[1] = %+v", events[1])
 	}
-	if !strings.Contains(string(result.Raw), `"fsError":-32601`) {
-		t.Fatalf("客户端未对 fs 请求返回 -32601: %s", result.Raw)
+}
+
+// TestClientReturns32601ForUnsupportedRequest 用内存管道确定性地验证：
+// Agent 反向请求未知方法时，客户端返回 JSON-RPC -32601。
+func TestClientReturns32601ForUnsupportedRequest(t *testing.T) {
+	clientSide, serverSide := net.Pipe()
+	client := NewClient(clientSide)
+	client.Start()
+	defer func() {
+		_ = client.Close()
+		_ = serverSide.Close()
+	}()
+
+	request := `{"jsonrpc":"2.0","id":"req-1","method":"fs/read_text_file","params":{"path":"/tmp/x"}}` + "\n"
+	if _, err := serverSide.Write([]byte(request)); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = serverSide.SetReadDeadline(time.Now().Add(2 * time.Second))
+	line, err := bufio.NewReader(serverSide).ReadString('\n')
+	if err != nil {
+		t.Fatalf("读取响应: %v", err)
+	}
+	var resp struct {
+		ID    string `json:"id"`
+		Error *struct {
+			Code int `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(line), &resp); err != nil {
+		t.Fatalf("解析响应: %v (%s)", err, line)
+	}
+	if resp.ID != "req-1" || resp.Error == nil || resp.Error.Code != -32601 {
+		t.Fatalf("响应 = %s", line)
 	}
 }
 
