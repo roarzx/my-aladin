@@ -55,7 +55,7 @@
 | 可靠性 | 租约、围栏、可靠投递、背压、取消、对账 |
 | 单机运行 | 单 Workspace、单仓库、单执行机器；`docker compose` 骨架随 A1 提供，完整部署、迁移与备份演练属 v2 的 I4 |
 
-**v1 不含（属 v2，第 6 章 F–I）**：小队模式与审批链、FlowRun 验收流程、外部需求系统接入、评估体系与性能基线、多副本部署。
+**v1 不含（属 v2，第 6 章 F–I）**：小队模式与审批链、FlowRun 验收流程、外部需求系统接入、评估体系与性能基线、多副本部署、其它 Provider（Codex / Kimi）适配。
 
 **不在路线图上**：自动上线、自动合并 PR、任意 Agent 自由派生、并行步骤调度、自研模型训练。知识库通过适配器接入，v1 实现为 Noop。
 
@@ -81,7 +81,7 @@
 
 ### 2.4 可插拔集成
 
-模型、Agent Runtime、机器传输、知识检索、需求来源与评估器分别提供接口。MCP 用于工具能力接入，不能替代任务状态机、权限模型或机器调度协议。机器侧与 Provider 之间使用 **ACP over stdio**，其消息子集见 9.7；控制面与执行面之间使用自研的 WS 协议，见 9.7。
+模型、Agent Runtime、机器传输、知识检索、需求来源与评估器分别提供接口。MCP 用于工具能力接入，不能替代任务状态机、权限模型或机器调度协议。机器侧与 Provider 之间使用 **ACP over stdio**，其消息子集见 **9.7.1**；控制面与执行面之间使用自研的 WS 协议，见 9.7。
 
 ### 2.5 可观测与评估
 
@@ -100,7 +100,7 @@
 | 热状态与协调 | **Redis 7** | Plan 权威态、任务锁、执行租约、恢复索引 |
 | 实时通道 | **WebSocket（全双工）** | 命令下行 + 事件上行 + 心跳 + 可靠重投 |
 | 机器执行 | **自研 daemon（Go 单二进制）** | 与控制面同语言；负责进程托管、工作区与上下文同步 |
-| 运行时协议 | **ACP over stdio（JSONL）** | 对接 Claude Code / Codex / Kimi |
+| 运行时协议 | **ACP over stdio（JSONL）** | v1 只对接 Claude Code；Codex / Kimi 后续接入同一适配层 |
 | 产物存储 | **本地文件 + 数据库引用** | 大日志不进入上下文，也不进入数据库 |
 | 测试 | **go test + testify**（后端）；**Vitest**（前端单测） | 分层；E2E 由 `make test-e2e` 驱动真实 daemon，不引入浏览器自动化 |
 | 部署 | **Docker Compose** | 服务、MySQL、Redis 可重复启动 |
@@ -476,7 +476,7 @@ aladdin/
 │   ├── integration/              # 依赖真实 MySQL/Redis（-tags=integration）
 │   ├── e2e/                      # 全链路（-tags=e2e）
 │   ├── perf/                     # 基线（-tags=perf）
-│   └── fixtures/                 # 样例仓库、脚本化对端、评估任务集
+│   └── fixtures/                 # 样例仓库、脚本化对端、ACP conformance（tests/fixtures/acp）、评估任务集
 ├── scripts/                      # 工具脚本（create-issues.py 等）
 ├── deploy/                       # docker-compose、初始化脚本
 ├── docs/                         # ADR、证据归档
@@ -539,7 +539,8 @@ type Runtime interface {
     Capabilities() CapabilitySet
 }
 
-// 执行面内部的 Provider 适配（Claude Code / Codex / Kimi 共用）。
+// 执行面内部的 Provider 适配（v1 只接 Claude Code；接口按多 Provider 设计，
+// 归一化层不能因为只有一家就省略）
 type Provider interface {
     Start(ctx context.Context, cfg ProviderConfig) (Session, error)
     Resume(ctx context.Context, acpSessionID string) (Session, error)
@@ -853,8 +854,8 @@ INSERT activities(task_id, seq, event_id, kind, payload)
 **B5：FakeRuntime（假 ACP 对端）** ← D 阶段的前置
 - 目标：提供一个可编排应答的假 Runtime，让闭环测试不依赖真实模型。
 - 文件：`internal/testkit/fakeruntime/runtime.go`、`internal/testkit/fakeruntime/script.go`、`tests/fixtures/scripts/basic.yaml`
-- 实现：`New(script) *Runtime`；实现 ACP client 接口；按脚本回放 `stream`、`step_done`、`step_fail`
-- 验收：可注入三种故障——中途断连、返回失败、超时不响应。
+- 实现：`New(script) *Runtime`；实现与 C5 相同的 Provider 边界（9.7.1 的 `AgentEvent` 归一化模型）；按脚本回放 `stream_delta`、`tool_call`、`turn_done`、`step_done`、`step_fail`
+- 验收：可注入三种故障——中途断连、返回失败、超时不响应；脚本不得依赖任何 Provider 的原始报文格式。
 - 测试：`go test ./internal/testkit/fakeruntime -run TestScript -v`
 
 **B6：WS 服务端骨架**
@@ -927,15 +928,15 @@ INSERT activities(task_id, seq, event_id, kind, payload)
 **C5：ACP 客户端与 Provider 启停**
 - 目标：按 agent_type 拉起子进程，走 ACP over stdio（JSONL）。
 - 文件：`internal/transport/acp/client.go`、`internal/transport/acp/process.go`
-- 实现：`Spawn(ctx, cfg) (Session, error)`；实现 `initialize` / `session/new` / `session/prompt`；子进程按进程组托管
-- 验收：子进程崩溃可被检测；停止时连带回收其派生的 build/test 进程。
+- 实现：`Spawn(ctx, cfg) (Session, error)`；按 **9.7.1** 实现 `initialize` / `authenticate` / `session/new` / `session/load` / `session/prompt` / `session/cancel`，并把报文归一化为 `AgentEvent`；子进程按进程组托管
+- 验收：子进程崩溃可被检测；停止时连带回收其派生的 build/test 进程；Claude Code 的 conformance fixture 回放通过（含未知 update 被忽略并计数、未知 request 返回 `-32601`）。
 - 测试：`go test ./internal/transport/acp -run TestSpawn -v`
 
 **C6：运行时探活**
 - 目标：派发真实工作前先 `initialize` 探活，失败在业务状态之前暴露。
 - 文件：`internal/transport/acp/validate.go`
 - 实现：`Validate(ctx, cfg) error`，默认 3s 超时
-- 验收：Provider 起不来时不创建会话，返回 `RUNTIME_START_FAILED`；耗时应为毫秒级。
+- 验收：Provider 起不来、协议版本不兼容或未登录时不创建会话，返回 `RUNTIME_START_FAILED`（detail 带原因）；耗时应为毫秒级。
 - 测试：`go test ./internal/transport/acp -run TestValidate -v`
 
 **C7：流式回传与背压**
@@ -1457,12 +1458,12 @@ INSERT activities(task_id, seq, event_id, kind, payload)
 
 1. **首批验收任务与授权仓库**：至少两个真实任务，覆盖单仓与跨仓；对应仓库的读写权限归属。
 2. **执行机器与模型预算**：机器数量、是否含云机器、每任务的 token 上限。
-3. **Provider 接入条件**：Claude Code / Codex / Kimi 各自的安装方式、版本锁定与登录态管理；哪些在首版必须支持。
+3. **Provider 接入条件**：v1 只要求 Claude Code —— 安装方式、版本锁定与登录态管理；Codex / Kimi 留到 v2 评估。
 4. **网络可达性**：MCP 服务、Git 仓库、模型端点在内网或云上的连通性；是否需要代理。
 5. **凭据管理**：机器 token 的签发与轮换责任人；私钥存放位置；日志脱敏的审计方式。
 6. **团队规模与交付时间**：决定第 6 章哪些阶段进入首版（见 6.1 的阶段划分）。
 
-**已由本文确定、无需再确认的**：技术栈（含版本约束）、状态机、数据模型与 DDL、权限矩阵、HTTP 与 WS 契约、并发与租约协议、配置项、错误码。
+**已由本文确定、无需再确认的**：技术栈（含版本约束）、v1 的 Provider 范围（仅 Claude Code）、ACP 消息子集（9.7.1）、状态机、数据模型与 DDL、权限矩阵、HTTP 与 WS 契约、并发与租约协议、配置项、错误码。
 
 ### 8.3 参考资料
 
@@ -1526,7 +1527,7 @@ INSERT activities(task_id, seq, event_id, kind, payload)
 | `executing` | Daemon 上报 `step.fail`，class ∈ {verification, permission} 或预算已尽 | `failed` | 记录 error_class；Plan → paused |
 | `executing` | 派发失败，class = runtime | `executing` | 自动重试 1 次；仍失败转 `failed` |
 | `executing` | 派发失败，class = permission 或其他 | `failed` | 记录 error_class |
-| `executing` | 租约超时 / daemon 上报结果未知 | `reconciling` | attempt.status=`unknown`；**不判 failed**；Plan → paused |
+| `executing` | 租约超时 / daemon 上报结果未知（含 `step_fail{uncertain=true}`） | `reconciling` | attempt.status=`unknown`；**不判 failed**；Plan → paused |
 | `reconciling` | 对账查到完成证据 | `completed` | 补写摘要与 commit_sha |
 | `reconciling` | 判定“未执行”，且 class 可自动重试、预算未尽 | `executing` | 自动新建 Attempt，无需人工 |
 | `reconciling` | 判定“未执行”，且不可自动重试 / 预算已尽 | `failed` | 转人工 Retry |
@@ -1580,7 +1581,7 @@ sequenceDiagram
   participant R as Redis
   participant DB as MySQL
   participant C as CLI Daemon
-  participant P as Provider(claude/codex/kimi)
+  participant P as Provider(Claude Code)
 
   U->>FE: 创建 Issue（模板/成员/Planner）
   FE->>S: POST /issues
@@ -1902,7 +1903,7 @@ CREATE TABLE agents (
   name         VARCHAR(128) NOT NULL,
   owner_id     BIGINT UNSIGNED NOT NULL,
   visibility   ENUM('private','shared') NOT NULL DEFAULT 'private',
-  runtime_type ENUM('claude_code','codex','kimi') NOT NULL,
+  runtime_type ENUM('claude_code','codex','kimi') NOT NULL,   -- v1 只使用 claude_code
   machine_id   CHAR(36) NOT NULL,
   work_dir     VARCHAR(512) NOT NULL,
   model        VARCHAR(64) NULL,
@@ -2069,7 +2070,7 @@ Redis 承载**热状态**，MySQL 承载**可重建的冷数据**。
 
 **v1 最小方案**：用户登录由组织 SSO 提供（OIDC），本系统只消费回调结果并签发会话 Cookie；若不接 SSO，则提供"每工作区一个管理令牌"的降级方案，由管理员在部署时注入。**不实现自建密码体系。**
 
-**机器令牌签发**：管理员在控制面为机器生成一次性明文 token（展示一次），服务端只保存 `sha256` 与过期时间；daemon 配置到 `config.yaml` 的 `server.auth_token`。轮换 = 生成新 token → daemon 更新 → 旧 token 标记 `revoked_at`。
+**机器令牌签发**：管理员在控制面为机器生成一次性明文 token（展示一次），服务端只保存 `sha256` 与过期时间；daemon 从环境变量 `ALADDIN_MACHINE_TOKEN` 读取（按 5.6，敏感项不写入配置文件）。轮换 = 生成新 token → daemon 更新环境变量 → 旧 token 标记 `revoked_at`。
 
 #### 9.5.2 权限矩阵
 
@@ -2217,6 +2218,8 @@ Redis 承载**热状态**，MySQL 承载**可重建的冷数据**。
 | `get_git_diff` / `list_git_commits` | `repo`、`range` | `response {data}` |
 | `register_agents` | `agents[]`（类型、版本、能力） | `response {ok}` |
 
+**`response` 的失败形态**：`{ accepted: false, error: { code, message } }`。`code` 使用 daemon 侧原因（如 `session_busy`、`runtime_start_failed`、`unsupported_method`），与控制面 HTTP 错误码（9.6）相互独立，不混用。
+
 **CLI → Server 事件**
 
 | `payload.kind` | 用途 |
@@ -2226,7 +2229,7 @@ Redis 承载**热状态**，MySQL 承载**可重建的冷数据**。
 | `tool_call` / `tool_call_update` | 工具过程（实测 788 / 3,235 次） |
 | `usage_update` | token 用量 |
 | `step_done` | `{ attempt_no, summary_digest, commit_sha, branch }` |
-| `step_fail` | `{ attempt_no, reason, error_class }` |
+| `step_fail` | `{ attempt_no, reason, error_class, uncertain? }`（`uncertain=true` 时服务端走对账，见 9.8.1） |
 
 **流**
 
@@ -2242,6 +2245,120 @@ Redis 承载**热状态**，MySQL 承载**可重建的冷数据**。
 2. 每条 `event` 带稳定 `id`；Server 按 `id` 去重。
 3. 未收到对端确认的消息进入重投队列，超时重发，**重发时 `id` 不变**。
 4. `execution_id` 不属于当前 attempt 的执行类消息（迟到、串号、终态后到达），**入审计但不推进状态**。
+
+### 9.7.1 ACP 消息子集（daemon ↔ Provider）
+
+> 本节只约束 **daemon ↔ Provider** 的 stdio 协议。控制面 ↔ daemon 是 9.7 的 WS；两者不得混用，也不得互相透传报文。
+
+**1. 传输与进程**
+
+- stdio，**JSON-RPC 2.0**，每行一个完整 JSON 对象（UTF-8，`\n` 分隔）；禁止跨行、禁止 `Content-Length` 头。
+- stdout 只承载协议消息。Provider 往 stdout 写日志视为**协议污染**，立即终止会话并记录 `acp.protocol_error`。
+- stderr 独立收集，逐行脱敏后落 `<profile>/logs/<session>.stderr.log`，并作为失败证据的 artifact。
+- 子进程按进程组托管（C12）；daemon 退出、取消或崩溃回收时整组清理。
+- 单行上限 `acp.max_message_bytes`（默认 1 MiB），超限按协议错误处理。
+
+**2. 版本与能力协商（`initialize`）**
+
+- 请求带 `protocolVersion`（整数）与 `clientCapabilities`。
+- **v1 不声明 `fs` 与 `terminal` 能力**：Provider 使用自带的文件与命令工具，daemon 不代执行。理由：缩小攻击面，并让“命令在机器侧再次校验”只发生在 Provider 自己的工具链里；将来要代执行时新增能力位即可，不影响本节其余契约。
+- 响应中的 `agentCapabilities`，v1 只依赖 `loadSession`；其余能力位记录但忽略。
+- `protocolVersion` 不兼容 → 立即失败 `RUNTIME_START_FAILED`（detail 带双方版本），**不得降级**。
+- 若响应声明 `authMethods` 而探测失败 → 同样失败，错误信息要求“先在机器上完成 Provider 登录”；v1 不实现交互式登录。
+- `initialize` 超时 `acp.initialize_timeout`（默认 3s，C6）。
+
+**3. 方法表（v1 必需）**
+
+Client → Agent：
+
+| 方法 | 类型 | 关键字段 | 期望 |
+|---|---|---|---|
+| `initialize` | request | `protocolVersion`、`clientCapabilities` | `protocolVersion`、`agentCapabilities` |
+| `authenticate` | request（按需） | `methodId` | 成功 / 失败 |
+| `session/new` | request | `cwd`、`mcpServers[]` | `sessionId` |
+| `session/load` | request（仅当声明 `loadSession`） | `sessionId`、`cwd`、`mcpServers[]` | 成功 / 失败 |
+| `session/prompt` | request | `sessionId`、`prompt[]` | `stopReason`、可选 `usage` |
+| `session/cancel` | **notification** | `sessionId` | 无响应；以 `prompt` 返回 `stopReason=cancelled` 作为确认 |
+
+Agent → Client：
+
+| 方法 / 通知 | 关键字段 | 归一化事件 |
+|---|---|---|
+| `session/update`（`agent_message_chunk`） | `sessionId`、`content{type:"text",text}` | `stream_delta` |
+| `session/update`（`agent_thought_chunk`） | 同上 | `thought_delta`（默认不进上下文） |
+| `session/update`（`tool_call`） | `toolCallId`、`title`、`kind`、`status`、`rawInput` | `tool_call` |
+| `session/update`（`tool_call_update`） | `toolCallId`、`status`、`content`、`rawOutput` | `tool_update` |
+| `session/update`（`plan`） | `entries[]` | `plan`（仅时间线展示） |
+| `session/request_permission` | `sessionId`、`toolCall`、`options[]` | `permission_decision` |
+
+- 未知的 `sessionUpdate` 值：**忽略并计数** `acp.unknown_update_total`（向前兼容）。
+- 未知的 **request**：返回 JSON-RPC `-32601` 并上报 `acp.unsupported_method`（显式失败，不假装成功）。
+- 用量：若 Provider 在 `session/prompt` 响应或 update 中提供 `usage`，映射为 `usage` 事件；缺失按 4.3 记为 unknown，**不得补零**。
+
+**4. 归一化事件模型**
+
+daemon 内部只消费这一层；各 Provider 的适配器只做 ACP → `AgentEvent` 的映射，C7/C8/C9 不接触原始报文。
+
+```go
+type AgentEvent struct {
+    SessionID string          // ACP sessionId
+    TurnID    string          // 一次 turn 的稳定标识：聊天为 message_id，步骤执行为 execution_id
+    Seq       uint64          // 每个 turn 内从 1 单调递增
+    Kind      EventKind       // stream_delta | thought_delta | tool_call | tool_update | plan | usage | permission_decision
+    Payload   any             // 按 Kind 解释
+}
+```
+
+- 一次 `session/prompt` = 一个 turn = 一个 `TurnID`。
+- `seq` 只在 turn 内有效；**`final` 由 `session/prompt` 的响应决定**，不由任何一条 delta 决定。
+- `stream_delta` 不保证可重放：daemon 只保留有界缓冲（C7 背压），断线期间丢失的增量**不补发**；前端以最终状态与 `activities` 为准，渲染层必须容忍缺口。
+- 终态消息（`turn_done` / `step_done` / `step_fail`）必须**落盘直到服务端 ack**，不得只存在于内存。
+
+**5. 会话、并发与恢复**
+
+- 同一 `sessionId` 同时只允许一个进行中的 `session/prompt`；第二个到达 → 以 `session_busy` 拒绝（WS `response.error`），**不排队**。ACP 会话本身串行，排队会让取消语义变复杂。
+- `session/prompt` 在 daemon 侧**不设超时**：执行可能持续数小时，存活性完全由租约心跳（9.8）判断；取消走 `session/cancel`。
+- 恢复顺序：E3 指纹匹配 → `session/load` 成功 → 复用；未声明 `loadSession` 或 load 失败 → **新建会话**（`session_ordinal + 1`）并写 `activities`（kind=`provider.resume_unsupported`），由 ContextAssembler 重新注入交接摘要。**不得静默降级成“看起来还在同一会话”**。
+- Provider 进程崩溃：`prompt` 以错误结束，daemon 上报 `step_fail{error_class=runtime, uncertain=<工作区是否有新提交>}`；`uncertain=true` 时 Server 走 9.8.1 对账，而不是直接 `failed`。
+- `stopReason` 映射（Provider 级例外优先于 3.4 的默认策略）：
+
+| `stopReason` | 处置 |
+|---|---|
+| `end_turn` | daemon 继续做交付检查（commit / 摘要），再发 `step_done` |
+| `cancelled` | 取消流程，不发 `step_done` |
+| `max_tokens` | `step_fail{error_class=runtime}`，按 3.4 自动重试一次 |
+| `max_turn_requests` | `step_fail{error_class=runtime, uncertain=false}`，**不自动重试**，提示人拆分任务 |
+| `refusal` | `step_fail{error_class=runtime, uncertain=false}`，**不自动重试**，直接暂停等人 |
+
+**6. 权限询问**
+
+- `session/request_permission` 由 **daemon 裁决**：按 `agents.capability_set` 与 9.5 的工具规则匹配 `options[]`，选择对应的 `optionId`；无匹配返回 `cancelled`。
+- 裁决结果写 `activities`（`tool.permission_decision`），只记工具名、决定与规则 ID，**不记参数全文**（3.9.6）。
+- **默认拒绝（fail-closed）**：未知工具、无法解析、裁决超时，一律拒绝。
+- v1 不向 UI 转发审批请求；需要人工批准的工具在 G7 直接配置为禁用。
+
+**7. 版本绑定与一致性测试**
+
+- 每个 Provider 接入时 pin 一个 CLI 版本，并把真实报文录制为 `tests/fixtures/acp/<provider>/<version>/` 的 conformance 用例。
+- **v1 只有 Claude Code 一个 Provider，因此只有一份 fixture**；但归一化层不能因为只有一家就省略——否则 Codex / Kimi 接入时要推翻 C7/C8 的假设。
+- **本节与 fixture 冲突时以 fixture 为准**，并在同一提交内回改本节——这是应对 ACP 仍在演进的手段。
+- C5 验收必须包含：Claude Code 的 conformance fixture 回放通过；未知 update 被忽略且计数；未知 request 返回 `-32601`。
+
+**8. 对应工作包**
+
+| 工作包 | 依赖本节的部分 |
+|---|---|
+| B5 | 按归一化事件回放脚本，不依赖真实 Provider |
+| C5 | 客户端、适配器、fail-closed 权限裁决 |
+| C6 | `initialize` + 版本 / 认证探测 |
+| C7 | `stream_delta`、`thought_delta` 与背压 |
+| C8 | `tool_call` / `tool_update` 配对 |
+| C9 | `prompt` 结果与摘要同步 |
+| E3 | `session/load` 与指纹复用 |
+
+**9. v1 不做**
+
+客户端 fs/terminal 代执行、MCP 交互式鉴权、多轮工具审批 UI、Provider 侧历史导出、ACP 流重放。
 
 ### 9.8 并发与租约协议
 
@@ -2365,6 +2482,15 @@ storage:
 security:
   machine_token_ttl: 24h
   log_redaction: true
+
+daemon:
+  server_url: "${ALADDIN_SERVER_URL}"
+  profile_dir: "~/.aladdin/profiles"
+  # 机器令牌只从环境变量 ALADDIN_MACHINE_TOKEN 读取，不写入本文件
+
+acp:
+  initialize_timeout: 3s
+  max_message_bytes: 1048576
 ```
 
 ### 9.10 实现顺序与规模
