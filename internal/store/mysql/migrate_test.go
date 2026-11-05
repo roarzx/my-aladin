@@ -13,6 +13,7 @@ import (
 
 	mysqlstore "github.com/roarzx/my-aladin/internal/store/mysql"
 	"github.com/roarzx/my-aladin/internal/testkit"
+	"github.com/roarzx/my-aladin/migrations"
 )
 
 // newDatabase 在测试服务器上创建一个独享库，测试结束删除。
@@ -101,7 +102,7 @@ func TestMigrateUpDownUp(t *testing.T) {
 	}
 
 	// down → up 幂等
-	if err := mysqlstore.MigrateDown(dsn, 1); err != nil {
+	if err := mysqlstore.MigrateDown(dsn, int(migrations.LatestVersion())); err != nil {
 		t.Fatalf("回滚: %v", err)
 	}
 	if err := db.QueryRow(
@@ -119,8 +120,8 @@ func TestMigrateUpDownUp(t *testing.T) {
 	if err := db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 1 {
-		t.Fatalf("迁移版本 = %d，期望 1", version)
+	if int64(version) != migrations.LatestVersion() {
+		t.Fatalf("迁移版本 = %d，期望 %d", version, migrations.LatestVersion())
 	}
 }
 

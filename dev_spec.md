@@ -519,6 +519,7 @@ aladdin/
 | Task | workspace_id、created_by、mode、status、version、config_snapshot（JSON，不可变）、cancel_requested_at |
 | TaskAgent | task_id、agent_id、role；普通模式提交执行前校验唯一 Planner |
 | Plan / Step | task_id、revision、hash、ordinal、status；计划版本和步骤顺序唯一 |
+| TaskTemplate | workspace_id、name、version、config JSON、enabled；创建任务时展开为不可变快照 |
 | Confirmation | plan_id、revision、hash、actor、timestamp；确认不可移用于新版本 |
 | SquadSnapshot | 成员、负责人、协作指令、审批规则及其来源版本 |
 | Proposal / Approval | proposal_revision、顺序、审批者、结论与证据 |
@@ -2040,6 +2041,9 @@ CREATE TABLE handoffs (
 
 3. **`task_agents` 的唯一 Planner**：生成列 + 唯一索引让数据库强制，
    而不是靠应用校验——应用校验在并发创建下会漏。
+
+**迁移与 DDL 的关系**：上述 DDL 是 `0001_init` 初始迁移的权威快照。后续变更一律新增迁移文件，
+不得修改已发布的迁移（例如 `0002_task_templates` 引入 `task_templates`，供 B4 的模板展开使用）。
 
 ### 9.4 Redis 键设计与重建规则
 

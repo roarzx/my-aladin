@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/v9"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/roarzx/my-aladin/internal/health"
 	"github.com/roarzx/my-aladin/internal/httpapi"
 	mysqlstore "github.com/roarzx/my-aladin/internal/store/mysql"
+	"github.com/roarzx/my-aladin/internal/task"
 	"github.com/roarzx/my-aladin/migrations"
 )
 
@@ -103,12 +105,18 @@ func run(cfgPath string) error {
 		slog.Warn("ALADDIN_ADMIN_TOKEN 未设置：业务接口将全部返回 401")
 	}
 
+	taskService := &task.Service{DB: db}
+
 	router := httpapi.New(httpapi.Deps{
 		Authenticator: authenticator,
 		Members:       &mysqlstore.WorkspaceStore{DB: db},
 		Logger:        slog.Default(),
 		Health:        healthHandler,
 		Ready:         readyHandler,
+		RegisterWorkspace: func(r chi.Router) {
+			r.With(auth.RequireAction(auth.ActionCreateIssue, nil)).
+				Post("/issues", (&task.Handler{Service: taskService}).Create)
+		},
 	})
 
 	srv := &http.Server{
