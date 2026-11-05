@@ -22,10 +22,12 @@ import (
 	"github.com/roarzx/my-aladin/internal/auth"
 	"github.com/roarzx/my-aladin/internal/buildinfo"
 	"github.com/roarzx/my-aladin/internal/config"
+	"github.com/roarzx/my-aladin/internal/domain"
 	"github.com/roarzx/my-aladin/internal/health"
 	"github.com/roarzx/my-aladin/internal/httpapi"
 	"github.com/roarzx/my-aladin/internal/machine"
 	"github.com/roarzx/my-aladin/internal/plan"
+	"github.com/roarzx/my-aladin/internal/session"
 	mysqlstore "github.com/roarzx/my-aladin/internal/store/mysql"
 	"github.com/roarzx/my-aladin/internal/task"
 	"github.com/roarzx/my-aladin/internal/transport/ws"
@@ -111,6 +113,12 @@ func run(cfgPath string) error {
 	}
 
 	taskService := &task.Service{DB: db}
+	sessionService := &session.Service{DB: db}
+	taskService.OnCreated = func(ctx context.Context, created *domain.Task) {
+		if err := sessionService.DispatchPlanning(ctx, created.ID, ""); err != nil {
+			slog.Warn("创建规划会话失败", "task", created.ID, "err", err)
+		}
+	}
 	planService := &plan.Service{DB: db}
 	planHandler := &plan.Handler{
 		DB:      db,

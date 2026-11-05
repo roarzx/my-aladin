@@ -27,6 +27,8 @@ type CreateRequest struct {
 // Service 负责任务创建：模板展开、成员校验与快照落库。
 type Service struct {
 	DB *sql.DB
+	// OnCreated 在任务提交后回调（用于创建规划会话）；错误不影响创建结果。
+	OnCreated func(ctx context.Context, task *domain.Task)
 }
 
 type agentRef struct {
@@ -133,6 +135,9 @@ func (s *Service) Create(ctx context.Context, creatorID uint64, workspaceID stri
 
 	if err := tx.Commit(); err != nil {
 		return nil, errcode.New(errcode.UpstreamUnavailable, "提交事务失败")
+	}
+	if s.OnCreated != nil {
+		s.OnCreated(ctx, &task)
 	}
 	return &task, nil
 }
