@@ -101,10 +101,11 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
       - name: 前端测试
         if: steps.check.outputs.exists == 'true'
         working-directory: web
         run: |
           pnpm install --frozen-lockfile
           pnpm test
+          pnpm run build

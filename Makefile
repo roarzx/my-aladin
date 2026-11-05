@@ -57,7 +57,7 @@ test-e2e:
 	$(GO) test -tags=e2e ./tests/e2e/... -count=1
 
 web-test:
-	@if [ -d web ]; then pnpm --filter web test; else echo "web/ 尚未创建，跳过"; fi
+	@if [ -d web ]; then pnpm --filter web test && pnpm --filter web build; else echo "web/ 尚未创建，跳过"; fi
 
 clean:
 	rm -rf $(BIN)
