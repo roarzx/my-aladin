@@ -1,0 +1,10 @@
+name: squad-e2e
+squad:
+  name: 演示小队
+  instructions: 负责人协调，成员交付
+  approvers: [10, 20]
+tasks:
+  - id: t1
+    title: 实现登录
+  - id: t2
+    title: 补充测试

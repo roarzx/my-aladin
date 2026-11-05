@@ -7,7 +7,7 @@ COMPOSE ?= docker compose -f deploy/docker-compose.yml
 DSN ?= root:root@tcp(127.0.0.1:3306)/aladdin_test?parseTime=true&loc=UTC&charset=utf8mb4
 REDIS ?= 127.0.0.1:6379
 
-.PHONY: all build test lint fmt integrate verify up down reset migrate test-integration test-e2e web-test clean
+.PHONY: all build test lint fmt integrate verify up down reset migrate test-integration test-e2e perf-test web-test clean
 
 all: build
 
@@ -54,7 +54,12 @@ test-integration:
 verify: up migrate test-integration test
 
 test-e2e:
-	$(GO) test -tags=e2e ./tests/e2e/... -count=1
+	TEST_MYSQL_DSN='$(DSN)' TEST_REDIS_ADDR='$(REDIS)' \
+		$(GO) test -tags=e2e ./tests/e2e/... -count=1
+
+perf-test:
+	TEST_MYSQL_DSN='$(DSN)' TEST_REDIS_ADDR='$(REDIS)' PERF_N=$(or $(PERF_N),30) \
+		$(GO) test -tags=perf ./tests/perf/... -count=1 -v
 
 web-test:
 	@if [ -d web ]; then pnpm --filter web test && pnpm --filter web build; else echo "web/ 尚未创建，跳过"; fi

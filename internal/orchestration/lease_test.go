@@ -49,8 +49,15 @@ func TestLease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expire: %v", err)
 	}
-	if len(expired) != 1 || expired[0].AttemptID != attempt.ID {
-		t.Fatalf("过期列表 = %+v", expired)
+	// 集成库可能残留其它测试的活跃 attempt；只断言本轮目标被扫描到
+	found := false
+	for _, item := range expired {
+		if item.AttemptID == attempt.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("过期列表未包含目标尝试 = %+v", expired)
 	}
 
 	got, err := mysqlstore.GetAttemptByID(ctx, f.db, attempt.ID)

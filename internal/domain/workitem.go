@@ -62,9 +62,10 @@ var workItemTransitions = map[WorkItemStatus]map[WorkItemEvent]WorkItemStatus{
 		WICancelled:         WorkItemCancelled,
 	},
 	WorkItemAwaitingApproval: {
-		WIApproved:  WorkItemReady,
-		WIRejected:  WorkItemReviewing,
-		WICancelled: WorkItemCancelled,
+		WIApprovalRequested: WorkItemAwaitingApproval, // 修订方案：重新等待审批
+		WIApproved:          WorkItemReady,
+		WIRejected:          WorkItemReviewing,
+		WICancelled:         WorkItemCancelled,
 	},
 	WorkItemReady: {
 		WIApprovalRequested: WorkItemAwaitingApproval, // 已就绪但方案被修订
