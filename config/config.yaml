@@ -1,0 +1,35 @@
+server:
+  http_addr: ":8080"
+  ws_path: "/v1/acp"
+  heartbeat_interval: 30s
+  heartbeat_timeout: 90s
+
+scheduler:
+  max_active_steps_per_task: 1
+  task_lock_ttl: 30s
+  task_lock_renew: 10s
+  attempt_lease_ttl: 60s
+  recovery_scan_interval: 30s
+  max_attempts_per_step: 3
+
+context:
+  tool_output_max_bytes: 32768
+  reserve_output_tokens: 4096
+  summary_only_when_dependency: true
+
+storage:
+  mysql_dsn: "${MYSQL_DSN}"
+  redis_addr: "${REDIS_ADDR}"
+  artifact_root: "./data/artifacts"
+
+security:
+  machine_token_ttl: 24h
+  log_redaction: true
+
+daemon:
+  server_url: "${ALADDIN_SERVER_URL}"
+  profile_dir: "~/.aladdin/profiles"
+
+acp:
+  initialize_timeout: 3s
+  max_message_bytes: 1048576

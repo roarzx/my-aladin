@@ -1,0 +1,31 @@
+-- 0001 init down：按创建顺序的反序删除，避免外键阻塞。
+
+DROP TABLE IF EXISTS handoffs;
+DROP TABLE IF EXISTS flow_node_runs;
+DROP TABLE IF EXISTS flow_runs;
+DROP TABLE IF EXISTS flow_templates;
+DROP TABLE IF EXISTS approvals;
+DROP TABLE IF EXISTS proposals;
+DROP TABLE IF EXISTS work_items;
+DROP TABLE IF EXISTS squad_snapshots;
+DROP TABLE IF EXISTS task_repositories;
+DROP TABLE IF EXISTS repositories;
+DROP TABLE IF EXISTS agents;
+DROP TABLE IF EXISTS machine_tokens;
+DROP TABLE IF EXISTS machines;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS artifacts;
+DROP TABLE IF EXISTS idempotency_records;
+DROP TABLE IF EXISTS activities;
+DROP TABLE IF EXISTS context_entries;
+DROP TABLE IF EXISTS reply_activities;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS attempts;
+DROP TABLE IF EXISTS confirmations;
+DROP TABLE IF EXISTS step_dependencies;
+DROP TABLE IF EXISTS plan_steps;
+DROP TABLE IF EXISTS plans;
+DROP TABLE IF EXISTS task_agents;
+DROP TABLE IF EXISTS tasks;
+DROP TABLE IF EXISTS workspace_members;
+DROP TABLE IF EXISTS workspaces;

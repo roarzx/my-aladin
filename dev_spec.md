@@ -53,7 +53,7 @@
 | 执行面全链路 | 自研 daemon：连接、会话、Provider、流式、上下文同步、Git、进程回收 |
 | 上下文治理 | 三层作用域、版本仲裁、预算裁剪 |
 | 可靠性 | 租约、围栏、可靠投递、背压、取消、对账 |
-| 单机运行 | 单 Workspace、单仓库、单执行机器；`docker compose` 骨架随 A1 提供，完整部署、迁移与备份演练属 v2 的 I4 |
+| 单机运行 | 单 Workspace、单仓库、单执行机器；`deploy/docker-compose.yml` 已随 A 阶段落地，完整部署、迁移与备份演练属 v2 的 I4 |
 
 **v1 不含（属 v2，第 6 章 F–I）**：小队模式与审批链、FlowRun 验收流程、外部需求系统接入、评估体系与性能基线、多副本部署、其它 Provider（Codex / Kimi）适配。
 
@@ -397,6 +397,13 @@ task.created
 | `make web-test` | `pnpm --filter web test` |
 
 CI：类型与静态检查→单元/契约→数据库集成→隔离 E2E。真实模型评估在受控环境手动或定期触发，失败报告保留产物与配置。
+
+**本地验证**统一走 `deploy/docker-compose.yml`（MySQL 8.0 + Redis 7，与 CI 镜像一致）：
+
+- `make up` 启动依赖；`make down` 停止；`make reset` 清空数据卷后重建
+- `make verify` 依次执行：启动依赖 → 迁移 → 集成测试 → 单测
+- 集成测试只读取 `TEST_MYSQL_DSN` / `TEST_REDIS_ADDR`，不依赖本机安装的数据库服务
+- 验证必须在本机完成后再提交，CI 只作为第二道保险
 
 ## 5. 系统架构与模块设计
 
