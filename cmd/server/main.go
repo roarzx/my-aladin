@@ -29,6 +29,7 @@ import (
 	"github.com/roarzx/my-aladin/internal/task"
 	"github.com/roarzx/my-aladin/internal/transport/ws"
 	"github.com/roarzx/my-aladin/migrations"
+	"github.com/roarzx/my-aladin/pkg/errcode"
 )
 
 func main() {
@@ -136,6 +137,10 @@ func run(cfgPath string) error {
 		Ready:         readyHandler,
 		MountRoot: func(r chi.Router) {
 			r.Handle(cfg.Server.WSPath, wsServer)
+			r.Route("/api/v1/cli", func(r chi.Router) {
+				r.Use(httpapi.MachineAuth(machineAuthenticator))
+				httpapi.MountCLI(r, &contextStore{db: db})
+			})
 		},
 		RegisterWorkspace: func(r chi.Router) {
 			r.With(auth.RequireAction(auth.ActionCreateIssue, nil)).
@@ -176,4 +181,38 @@ func run(cfgPath string) error {
 		return fmt.Errorf("优雅关闭: %w", err)
 	}
 	return nil
+}
+
+// contextStore 实现 httpapi.ContextStore，供 daemon 的 CLI HTTP API 使用（9.6.1）。
+type contextStore struct{ db *sql.DB }
+
+func (s *contextStore) ListVersions(ctx context.Context, taskID, scopeKind, scopeID string) ([]httpapi.ContextVersion, error) {
+	entries, err := mysqlstore.ListContextVersions(ctx, s.db, taskID, scopeKind, scopeID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]httpapi.ContextVersion, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, httpapi.ContextVersion{Kind: entry.Kind, Version: entry.Version})
+	}
+	return out, nil
+}
+
+func (s *contextStore) GetVersion(ctx context.Context, taskID, scopeKind, scopeID, kind string, version int) (string, error) {
+	entry, err := mysqlstore.GetContextVersion(ctx, s.db, taskID, scopeKind, scopeID, kind, version)
+	if err != nil {
+		return "", err
+	}
+	return entry.Content, nil
+}
+
+func (s *contextStore) PutVersion(ctx context.Context, taskID, scopeKind, scopeID, kind, content string, expectedVersion int) (int, error) {
+	entry, err := mysqlstore.PutContextVersion(ctx, s.db, taskID, scopeKind, scopeID, kind, content, expectedVersion)
+	if errors.Is(err, mysqlstore.ErrContextConflict) {
+		return 0, errcode.New(errcode.Conflict, "上下文版本冲突")
+	}
+	if err != nil {
+		return 0, err
+	}
+	return entry.Version, nil
 }
