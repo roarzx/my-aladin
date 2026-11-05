@@ -1,0 +1,27 @@
+# FakeRuntime 回放脚本（B5）
+#
+# 三种故障：
+#   exec-dispatch-error → 派发阶段断连（FailDispatch）
+#   exec-fail           → 返回失败
+#   exec-hang           → 超时不响应（保持 running，等待 Cancel）
+steps:
+  - execution_id: exec-ok
+    result: completed
+    events:
+      - kind: stream_delta
+        delta: "working"
+      - kind: tool_call
+        delta: "read_file"
+
+  - execution_id: exec-fail
+    result: failed
+    error_class: tool
+    events:
+      - kind: stream_delta
+        delta: "about to fail"
+
+  - execution_id: exec-hang
+    hang: true
+
+  - execution_id: exec-dispatch-error
+    fail_dispatch: true
