@@ -78,19 +78,33 @@ jobs:
 
   web:
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('web/package.json') != '' }}
-    defaults:
-      run:
-        working-directory: web
     steps:
       - uses: actions/checkout@v4
+
+      # hashFiles 在 job 级 if 中不可用，这里用脚本判断并写入 step output
+      - name: 检查前端是否存在
+        id: check
+        run: |
+          if [ -f web/package.json ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "web/ 尚未创建，跳过前端测试"
+          fi
+
       - uses: pnpm/action-setup@v4
+        if: steps.check.outputs.exists == 'true'
         with:
           version: 9
       - uses: actions/setup-node@v4
+        if: steps.check.outputs.exists == 'true'
         with:
           node-version: 20
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test
+      - name: 前端测试
+        if: steps.check.outputs.exists == 'true'
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm test
