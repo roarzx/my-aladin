@@ -53,7 +53,7 @@ CI：lint / unit / integration / web 四个 job，见 `.github/workflows/ci.yml`
 | G 验收流程与外部集成（G1–G7） | ✅ 完成（G8 前端进行中） |
 | H 可观测与评估（H1–H6） | ✅ 完成（H7 前端进行中） |
 | I E2E / 性能 / 部署 / 文档 / 证据 | ✅ 本轮完成 |
-| C11 Flow 节点 Worker（执行侧） | ⏳ 待实现 |
+| C11 Flow 节点 Worker（执行侧） | ✅ 完成 |
 | 前端完整页面 | 🚧 由另一个工作流实现 |
 
 ## 已知限制

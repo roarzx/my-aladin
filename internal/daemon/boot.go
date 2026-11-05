@@ -73,17 +73,26 @@ func Run(ctx context.Context, opts Options) error {
 		return errors.New("agent.claude: 未配置")
 	}
 	running := NewRunningExecutions()
+	providerConfig := acp.Config{
+		Bin:               agentRuntime.Bin,
+		ExpectedVersion:   agentRuntime.ExpectedVersion,
+		Cwd:               profile.Dir,
+		InitializeTimeout: cfg.ACP.InitializeTimeout.Std(),
+		InputTimeout:      time.Duration(agentRuntime.InputTimeoutSeconds) * time.Second,
+	}
 	stepHandler := &StepHandler{
-		ProviderConfig: acp.Config{
-			Bin:               agentRuntime.Bin,
-			ExpectedVersion:   agentRuntime.ExpectedVersion,
-			Cwd:               profile.Dir,
-			InitializeTimeout: cfg.ACP.InitializeTimeout.Std(),
-			InputTimeout:      time.Duration(agentRuntime.InputTimeoutSeconds) * time.Second,
-		},
-		Spawner: reaper,
-		Running: running,
-		Log:     slog.Default(),
+		ProviderConfig: providerConfig,
+		Spawner:        reaper,
+		Running:        running,
+		Log:            slog.Default(),
+	}
+	if cfg.Daemon.APIURL != "" {
+		cli := NewCLIClient(cfg.Daemon.APIURL, token)
+		worker := &FlowNodeWorker{
+			Client: cli, ProviderConfig: providerConfig, Spawner: reaper,
+			Interval: 3 * time.Second, Heartbeat: 10 * time.Second, Log: slog.Default(),
+		}
+		go worker.Run(ctx)
 	}
 	dispatcher := NewDispatcher(idempotent, stepHandler.Handle, slog.Default())
 

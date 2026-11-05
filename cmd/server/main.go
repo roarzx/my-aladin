@@ -24,6 +24,7 @@ import (
 	"github.com/roarzx/my-aladin/internal/buildinfo"
 	"github.com/roarzx/my-aladin/internal/config"
 	"github.com/roarzx/my-aladin/internal/domain"
+	"github.com/roarzx/my-aladin/internal/flow"
 	"github.com/roarzx/my-aladin/internal/health"
 	"github.com/roarzx/my-aladin/internal/httpapi"
 	"github.com/roarzx/my-aladin/internal/machine"
@@ -202,6 +203,12 @@ func run(cfgPath string) error {
 			r.Route("/api/v1/cli", func(r chi.Router) {
 				r.Use(httpapi.MachineAuth(machineAuthenticator))
 				httpapi.MountCLI(r, &contextStore{db: db})
+				flowHandler := &flow.Handler{DB: db, TTL: cfg.Scheduler.AttemptLeaseTTL.Std()}
+				r.Post("/flow-run-nodes/claim", flowHandler.Claim)
+				r.Post("/flow-run-nodes/{id}/heartbeat", flowHandler.Heartbeat)
+				r.Post("/flow-run-nodes/{id}/complete", flowHandler.Complete)
+				r.Post("/flow-run-nodes/{id}/fail", flowHandler.Fail)
+				r.Post("/flow-run-nodes/{id}/cancel-ack", flowHandler.CancelAck)
 			})
 		},
 		RegisterGlobal: func(r chi.Router) {

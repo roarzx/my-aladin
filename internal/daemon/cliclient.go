@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,23 @@ import (
 //
 // 与 agentctx.ErrVersionConflict 是同一哨兵：上下文仲裁统一走 agentctx（E1）。
 var ErrContextConflict = agentctx.ErrVersionConflict
+
+// ErrFlowLeaseLost 表示 Flow 节点租约已失效（HTTP 409）。
+var ErrFlowLeaseLost = errors.New("flow: 节点租约已失效")
+
+// statusError 保留 HTTP 状态码，同时保持与旧哨兵的 errors.Is 兼容。
+type statusError struct {
+	status int
+	err    error
+}
+
+func (e *statusError) Error() string { return e.err.Error() }
+func (e *statusError) Unwrap() error { return e.err }
+
+func statusOf(err error, target int) bool {
+	var se *statusError
+	return errors.As(err, &se) && se.status == target
+}
 
 // CLIClient 是 daemon → 控制面的 CLI HTTP API 客户端（9.6.1）。
 type CLIClient struct {
@@ -136,7 +154,7 @@ func (c *CLIClient) do(ctx context.Context, method, path string, body any, out a
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 
 	if resp.StatusCode == http.StatusConflict {
-		return ErrContextConflict
+		return &statusError{status: http.StatusConflict, err: ErrContextConflict}
 	}
 	if resp.StatusCode >= 400 {
 		var body struct {
@@ -162,4 +180,88 @@ func (c *CLIClient) do(ctx context.Context, method, path string, body any, out a
 		return err
 	}
 	return json.Unmarshal(envelope.Data, out)
+}
+
+// FlowNodeClaim 是机器领取到的 Flow 节点。
+type FlowNodeClaim struct {
+	NodeID           string          `json:"nodeId"`
+	RunID            string          `json:"runId"`
+	TaskID           string          `json:"taskId"`
+	NodeKey          string          `json:"nodeKey"`
+	Ordinal          int             `json:"ordinal"`
+	LeaseEpoch       uint64          `json:"leaseEpoch"`
+	AttemptNo        int             `json:"attemptNo"`
+	Inputs           json.RawMessage `json:"inputs"`
+	TemplateSnapshot json.RawMessage `json:"templateSnapshot"`
+}
+
+// ClaimFlowNode 领取一个 agent_prompt 节点；没有可领取节点时返回 ok=false。
+func (c *CLIClient) ClaimFlowNode(ctx context.Context) (*FlowNodeClaim, bool, error) {
+	var out *struct {
+		Node struct {
+			ID         string `json:"id"`
+			RunID      string `json:"runId"`
+			NodeKey    string `json:"nodeKey"`
+			Ordinal    int    `json:"ordinal"`
+			LeaseEpoch uint64 `json:"leaseEpoch"`
+			AttemptNo  int    `json:"attemptNo"`
+		} `json:"node"`
+		Run struct {
+			ID               string          `json:"id"`
+			TaskID           string          `json:"taskId"`
+			TemplateSnapshot json.RawMessage `json:"templateSnapshot"`
+			Inputs           json.RawMessage `json:"inputs"`
+		} `json:"run"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/api/v1/cli/flow-run-nodes/claim", map[string]any{}, &out); err != nil {
+		return nil, false, err
+	}
+	if out == nil {
+		return nil, false, nil
+	}
+	return &FlowNodeClaim{
+		NodeID: out.Node.ID, RunID: out.Node.RunID, TaskID: out.Run.TaskID,
+		NodeKey: out.Node.NodeKey, Ordinal: out.Node.Ordinal,
+		LeaseEpoch: out.Node.LeaseEpoch, AttemptNo: out.Node.AttemptNo,
+		Inputs: out.Run.Inputs, TemplateSnapshot: out.Run.TemplateSnapshot,
+	}, true, nil
+}
+
+// HeartbeatFlowNode 续约。
+func (c *CLIClient) HeartbeatFlowNode(ctx context.Context, nodeID string, epoch uint64) error {
+	err := c.do(ctx, http.MethodPost,
+		"/api/v1/cli/flow-run-nodes/"+url.PathEscape(nodeID)+"/heartbeat",
+		map[string]any{"leaseEpoch": epoch}, nil)
+	if statusOf(err, http.StatusConflict) {
+		return ErrFlowLeaseLost
+	}
+	return err
+}
+
+// CompleteFlowNode 上报成功结果。
+func (c *CLIClient) CompleteFlowNode(ctx context.Context, nodeID string, epoch uint64, payload json.RawMessage) error {
+	err := c.do(ctx, http.MethodPost,
+		"/api/v1/cli/flow-run-nodes/"+url.PathEscape(nodeID)+"/complete",
+		map[string]any{"leaseEpoch": epoch, "payload": payload}, nil)
+	if statusOf(err, http.StatusConflict) {
+		return ErrFlowLeaseLost
+	}
+	return err
+}
+
+// FailFlowNode 上报失败原因。
+func (c *CLIClient) FailFlowNode(ctx context.Context, nodeID string, epoch uint64, reason string) error {
+	err := c.do(ctx, http.MethodPost,
+		"/api/v1/cli/flow-run-nodes/"+url.PathEscape(nodeID)+"/fail",
+		map[string]any{"leaseEpoch": epoch, "reason": reason}, nil)
+	if statusOf(err, http.StatusConflict) {
+		return ErrFlowLeaseLost
+	}
+	return err
+}
+
+// AckFlowNodeCancel 向服务端确认取消已处理（审计用）。
+func (c *CLIClient) AckFlowNodeCancel(ctx context.Context, nodeID string) error {
+	return c.do(ctx, http.MethodPost,
+		"/api/v1/cli/flow-run-nodes/"+url.PathEscape(nodeID)+"/cancel-ack", nil, nil)
 }
