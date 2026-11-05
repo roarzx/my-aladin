@@ -1,14 +1,16 @@
 // Package daemon 是执行面进程的装配入口。
 //
-// A 阶段只提供可运行的骨架：加载配置、校验必填项、等待退出信号。
-// C1 会在此基础上加入 Profile 解析、控制面连接与命令分发。
+// C-1 提供：Profile 解析、控制面连接、握手、心跳、重连与命令响应骨架。
+// C-2 起在此基础上加入命令幂等、会话与 Provider 管理。
 package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/roarzx/my-aladin/internal/buildinfo"
 	"github.com/roarzx/my-aladin/internal/config"
@@ -16,37 +18,52 @@ import (
 
 // Options 是 daemon 的启动参数。
 type Options struct {
-	// Profile 对应 ~/.aladdin/profiles/<profile>/，同一机器可并行多个实例。
+	// Profile 对应 <profile_dir>/<profile>/，同一机器可并行多个实例。
 	Profile string
 	// ConfigPath 是配置文件路径。
 	ConfigPath string
+	// MachineID 为空时按 profile 目录中的 machine_id 解析或生成。
+	MachineID string
 }
 
-// Run 启动 daemon 骨架，直到 ctx 取消。
+// Run 启动 daemon，直到 ctx 取消或服务端拒绝连接。
 func Run(ctx context.Context, opts Options) error {
-	if opts.Profile == "" {
-		return fmt.Errorf("profile: 不能为空")
-	}
-	cfg, err := config.Load(opts.ConfigPath)
+	cfg, err := config.LoadFor(opts.ConfigPath, config.RoleDaemon)
 	if err != nil {
 		return err
 	}
-	if cfg.Daemon.ServerURL == "" {
-		return fmt.Errorf("daemon.server_url: 必填（或设置 ALADDIN_SERVER_URL）")
-	}
-	if os.Getenv("ALADDIN_MACHINE_TOKEN") == "" {
-		slog.Warn("ALADDIN_MACHINE_TOKEN 未设置；C 阶段连接控制面时会失败",
-			"profile", opts.Profile)
+
+	profile, err := ResolveProfile(cfg.Daemon.ProfileDir, opts.Profile, opts.MachineID)
+	if err != nil {
+		return err
 	}
 
-	slog.Info("daemon 骨架启动",
+	token := os.Getenv("ALADDIN_MACHINE_TOKEN")
+	if token == "" {
+		return errors.New("ALADDIN_MACHINE_TOKEN: 未设置（机器令牌见 9.5.1）")
+	}
+
+	client := NewClient(ClientOptions{
+		ACPURL:            cfg.Daemon.ACPURL,
+		MachineID:         profile.MachineID,
+		Token:             token,
+		CLIVersion:        buildinfo.Version,
+		HeartbeatInterval: cfg.Server.HeartbeatInterval.Std(),
+		HeartbeatTimeout:  cfg.Server.HeartbeatTimeout.Std(),
+		MaxMessageBytes:   cfg.ACP.MaxMessageBytes,
+		Backoff:           Backoff{Base: 500 * time.Millisecond, Max: 30 * time.Second},
+	})
+
+	slog.Info("daemon 启动",
 		"version", buildinfo.String(),
-		"profile", opts.Profile,
-		"server", cfg.Daemon.ServerURL,
-		"profile_dir", cfg.Daemon.ProfileDir,
+		"profile", profile.Name,
+		"profile_dir", profile.Dir,
+		"machine", profile.MachineID,
+		"acp_url", cfg.Daemon.ACPURL,
 	)
 
-	<-ctx.Done()
-	slog.Info("daemon 退出", "reason", ctx.Err())
+	if err := client.Run(ctx); err != nil {
+		return fmt.Errorf("daemon 连接: %w", err)
+	}
 	return nil
 }

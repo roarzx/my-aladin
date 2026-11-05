@@ -16,6 +16,8 @@ context:
   tool_output_max_bytes: 32768
   reserve_output_tokens: 4096
   summary_only_when_dependency: true
+  recent_n: 3
+  recent_message_n: 5
 
 storage:
   mysql_dsn: "${MYSQL_DSN}"
@@ -28,8 +30,15 @@ security:
   admin_user_id: 1
 
 daemon:
-  server_url: "${ALADDIN_SERVER_URL}"
+  acp_url: "${ALADDIN_ACP_URL}"
+  api_url: "${ALADDIN_API_URL}"
   profile_dir: "~/.aladdin/profiles"
+
+agent:
+  claude:
+    bin: ""
+    expected_version: "0.94.0"
+    input_timeout_seconds: 1800
 
 acp:
   initialize_timeout: 3s

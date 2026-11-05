@@ -93,6 +93,11 @@ func NewServer(auth MachineAuthenticator, cfg Config, logger *slog.Logger) *Serv
 	}
 }
 
+// ServeHTTP 让 Server 可直接挂到路由上。
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.HandleUpgrade(w, r)
+}
+
 // HandleUpgrade 是 http.HandlerFunc：认证 → 握手 → 心跳 → 业务 Handler。
 func (s *Server) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 	machineID, err := s.auth(r)

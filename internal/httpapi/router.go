@@ -20,6 +20,9 @@ type Deps struct {
 	Health http.HandlerFunc
 	Ready  http.HandlerFunc
 
+	// MountRoot 挂载在根路由上且不经过控制面认证，用于 WS 等自带鉴权的端点。
+	MountRoot func(chi.Router)
+
 	// RegisterGlobal 挂载在 / 下，已通过认证。
 	RegisterGlobal func(chi.Router)
 	// RegisterWorkspace 挂载在 /workspaces/{wid} 下，已通过认证与成员校验。
@@ -39,6 +42,9 @@ func New(d Deps) http.Handler {
 	}
 	if d.Ready != nil {
 		r.Get("/readyz", d.Ready)
+	}
+	if d.MountRoot != nil {
+		d.MountRoot(r)
 	}
 
 	r.Group(func(pr chi.Router) {

@@ -48,13 +48,14 @@ func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
 func (d Duration) Std() time.Duration { return time.Duration(d) }
 
 type Config struct {
-	Server    ServerConfig    `yaml:"server"`
-	Scheduler SchedulerConfig `yaml:"scheduler"`
-	Context   ContextConfig   `yaml:"context"`
-	Storage   StorageConfig   `yaml:"storage"`
-	Security  SecurityConfig  `yaml:"security"`
-	Daemon    DaemonConfig    `yaml:"daemon"`
-	ACP       ACPConfig       `yaml:"acp"`
+	Server    ServerConfig                  `yaml:"server"`
+	Scheduler SchedulerConfig               `yaml:"scheduler"`
+	Context   ContextConfig                 `yaml:"context"`
+	Storage   StorageConfig                 `yaml:"storage"`
+	Security  SecurityConfig                `yaml:"security"`
+	Daemon    DaemonConfig                  `yaml:"daemon"`
+	Agents    map[string]AgentRuntimeConfig `yaml:"agent"`
+	ACP       ACPConfig                     `yaml:"acp"`
 }
 
 type ServerConfig struct {
@@ -77,6 +78,8 @@ type ContextConfig struct {
 	ToolOutputMaxBytes        int  `yaml:"tool_output_max_bytes"`
 	ReserveOutputTokens       int  `yaml:"reserve_output_tokens"`
 	SummaryOnlyWhenDependency bool `yaml:"summary_only_when_dependency"`
+	RecentN                   int  `yaml:"recent_n"`
+	RecentMessageN            int  `yaml:"recent_message_n"`
 }
 
 type StorageConfig struct {
@@ -93,8 +96,16 @@ type SecurityConfig struct {
 }
 
 type DaemonConfig struct {
-	ServerURL  string `yaml:"server_url"`
+	ACPURL     string `yaml:"acp_url"`
+	APIURL     string `yaml:"api_url"`
 	ProfileDir string `yaml:"profile_dir"`
+}
+
+// AgentRuntimeConfig 是单个 Provider 的启动配置（对齐参考实现的 [agent.<name>]）。
+type AgentRuntimeConfig struct {
+	Bin                 string `yaml:"bin"`
+	ExpectedVersion     string `yaml:"expected_version"`
+	InputTimeoutSeconds int    `yaml:"input_timeout_seconds"`
 }
 
 type ACPConfig struct {
@@ -123,6 +134,8 @@ func Default() *Config {
 			ToolOutputMaxBytes:        32768,
 			ReserveOutputTokens:       4096,
 			SummaryOnlyWhenDependency: true,
+			RecentN:                   3,
+			RecentMessageN:            5,
 		},
 		Storage: StorageConfig{
 			ArtifactRoot: "./data/artifacts",
@@ -134,6 +147,12 @@ func Default() *Config {
 		},
 		Daemon: DaemonConfig{
 			ProfileDir: "~/.aladdin/profiles",
+		},
+		Agents: map[string]AgentRuntimeConfig{
+			"claude": {
+				ExpectedVersion:     "0.94.0",
+				InputTimeoutSeconds: 1800,
+			},
 		},
 		ACP: ACPConfig{
 			InitializeTimeout: Duration(3 * time.Second),
@@ -185,7 +204,8 @@ func applyEnv(cfg *Config) {
 		{"MYSQL_DSN", &cfg.Storage.MySQLDSN},
 		{"REDIS_ADDR", &cfg.Storage.RedisAddr},
 		{"ARTIFACT_ROOT", &cfg.Storage.ArtifactRoot},
-		{"ALADDIN_SERVER_URL", &cfg.Daemon.ServerURL},
+		{"ALADDIN_ACP_URL", &cfg.Daemon.ACPURL},
+		{"ALADDIN_API_URL", &cfg.Daemon.APIURL},
 		{"ALADDIN_HTTP_ADDR", &cfg.Server.HTTPAddr},
 	}
 	for _, o := range overrides {
@@ -255,7 +275,17 @@ func (c *Config) ValidateFor(role Role) error {
 
 	require("daemon.profile_dir", c.Daemon.ProfileDir)
 	if role == RoleDaemon {
-		require("daemon.server_url", c.Daemon.ServerURL)
+		require("daemon.acp_url", c.Daemon.ACPURL)
+		require("daemon.api_url", c.Daemon.APIURL)
+	}
+	for name, rt := range c.Agents {
+		path := "agent." + name
+		if rt.ExpectedVersion == "" {
+			errs = append(errs, fmt.Errorf("%s.expected_version: 必填", path))
+		}
+		if rt.InputTimeoutSeconds <= 0 {
+			errs = append(errs, fmt.Errorf("%s.input_timeout_seconds: 必须大于 0", path))
+		}
 	}
 
 	return errors.Join(errs...)

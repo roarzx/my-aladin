@@ -13,7 +13,7 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
 		"MYSQL_DSN", "REDIS_ADDR", "ARTIFACT_ROOT",
-		"ALADDIN_SERVER_URL", "ALADDIN_HTTP_ADDR",
+		"ALADDIN_ACP_URL", "ALADDIN_API_URL", "ALADDIN_HTTP_ADDR",
 	} {
 		t.Setenv(k, "")
 	}
@@ -44,7 +44,8 @@ security:
   machine_token_ttl: 24h
   log_redaction: true
 daemon:
-  server_url: "ws://127.0.0.1:8080/v1/acp"
+  acp_url: "ws://127.0.0.1:8080/v1/acp"
+  api_url: "http://127.0.0.1:8080"
   profile_dir: "~/.aladdin/profiles"
 acp:
   initialize_timeout: 3s
@@ -108,6 +109,9 @@ func TestDefaultsWhenOmitted(t *testing.T) {
 	if cfg.Security.AdminUserID != 1 {
 		t.Errorf("默认 admin_user_id = %d", cfg.Security.AdminUserID)
 	}
+	if rt, ok := cfg.Agents["claude"]; !ok || rt.ExpectedVersion == "" || rt.InputTimeoutSeconds <= 0 {
+		t.Errorf("默认 Agent 配置 = %+v", cfg.Agents)
+	}
 	// 缺 storage 时控制面校验必须失败
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "storage.mysql_dsn") {
 		t.Fatalf("期望缺 DSN 校验失败，实际: %v", err)
@@ -135,7 +139,8 @@ func TestDaemonRoleDoesNotRequireStorage(t *testing.T) {
 	clearEnv(t)
 	raw := `
 daemon:
-  server_url: "ws://127.0.0.1:8080/v1/acp"
+  acp_url: "ws://127.0.0.1:8080/v1/acp"
+  api_url: "http://127.0.0.1:8080"
   profile_dir: "~/.aladdin/profiles"
 `
 	cfg, err := Parse(raw)

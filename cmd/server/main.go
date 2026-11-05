@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,8 +24,10 @@ import (
 	"github.com/roarzx/my-aladin/internal/config"
 	"github.com/roarzx/my-aladin/internal/health"
 	"github.com/roarzx/my-aladin/internal/httpapi"
+	"github.com/roarzx/my-aladin/internal/machine"
 	mysqlstore "github.com/roarzx/my-aladin/internal/store/mysql"
 	"github.com/roarzx/my-aladin/internal/task"
+	"github.com/roarzx/my-aladin/internal/transport/ws"
 	"github.com/roarzx/my-aladin/migrations"
 )
 
@@ -107,12 +110,33 @@ func run(cfgPath string) error {
 
 	taskService := &task.Service{DB: db}
 
+	machineAuthenticator := func(req *http.Request) (string, error) {
+		header := req.Header.Get("Authorization")
+		const prefix = "Bearer "
+		if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+			return "", errors.New("缺少机器令牌")
+		}
+		machineID, err := mysqlstore.MachineByToken(req.Context(), db, machine.HashToken(header[len(prefix):]))
+		if err != nil {
+			return "", err
+		}
+		return machineID, nil
+	}
+	wsServer := ws.NewServer(machineAuthenticator, ws.Config{
+		HeartbeatInterval: cfg.Server.HeartbeatInterval.Std(),
+		HeartbeatTimeout:  cfg.Server.HeartbeatTimeout.Std(),
+		MaxMessageBytes:   cfg.ACP.MaxMessageBytes,
+	}, slog.Default())
+
 	router := httpapi.New(httpapi.Deps{
 		Authenticator: authenticator,
 		Members:       &mysqlstore.WorkspaceStore{DB: db},
 		Logger:        slog.Default(),
 		Health:        healthHandler,
 		Ready:         readyHandler,
+		MountRoot: func(r chi.Router) {
+			r.Handle(cfg.Server.WSPath, wsServer)
+		},
 		RegisterWorkspace: func(r chi.Router) {
 			r.With(auth.RequireAction(auth.ActionCreateIssue, nil)).
 				Post("/issues", (&task.Handler{Service: taskService}).Create)

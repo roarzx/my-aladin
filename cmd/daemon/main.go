@@ -14,8 +14,9 @@ import (
 
 func main() {
 	var opts daemon.Options
-	flag.StringVar(&opts.Profile, "profile", "default", "profile 名称（对应 ~/.aladdin/profiles/<profile>/）")
+	flag.StringVar(&opts.Profile, "profile", "default", "profile 名称（对应 <profile_dir>/<profile>/）")
 	flag.StringVar(&opts.ConfigPath, "config", "config/config.yaml", "配置文件路径")
+	flag.StringVar(&opts.MachineID, "machine-id", "", "机器 ID（默认从 profile 目录读取或生成）")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

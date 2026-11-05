@@ -45,7 +45,7 @@
 
 ### 1.3 范围与非目标
 
-**v1 范围 = 第 6 章的 A–E 阶段（56 个工作包）**
+**v1 范围 = 第 6 章的 A–E 阶段（55 个工作包；C11 随 v2 交付）**
 
 | 包含 | 说明 |
 |---|---|
@@ -55,7 +55,7 @@
 | 可靠性 | 租约、围栏、可靠投递、背压、取消、对账 |
 | 单机运行 | 单 Workspace、单仓库、单执行机器；`deploy/docker-compose.yml` 已随 A 阶段落地，完整部署、迁移与备份演练属 v2 的 I4 |
 
-**v1 不含（属 v2，第 6 章 F–I）**：小队模式与审批链、FlowRun 验收流程、外部需求系统接入、评估体系与性能基线、多副本部署、其它 Provider（Codex / Kimi）适配。
+**v1 不含（属 v2，第 6 章 F–I 与 C11）**：小队模式与审批链、FlowRun 验收流程、Flow 节点 Worker（C11）、外部需求系统接入、评估体系与性能基线、多副本部署、其它 Provider（Codex / Kimi）适配。
 
 **不在路线图上**：自动上线、自动合并 PR、任意 Agent 自由派生、并行步骤调度、自研模型训练。知识库通过适配器接入，v1 实现为 Noop。
 
@@ -100,7 +100,7 @@
 | 热状态与协调 | **Redis 7** | Plan 权威态、任务锁、执行租约、恢复索引 |
 | 实时通道 | **WebSocket（全双工）** | 命令下行 + 事件上行 + 心跳 + 可靠重投 |
 | 机器执行 | **自研 daemon（Go 单二进制）** | 与控制面同语言；负责进程托管、工作区与上下文同步 |
-| 运行时协议 | **ACP over stdio（JSONL）** | v1 只对接 Claude Code；Codex / Kimi 后续接入同一适配层 |
+| 运行时协议 | **ACP over stdio（JSONL）** | v1 只对接 Claude Code；通过 `@agentclientprotocol/claude-agent-acp` 适配器接入，版本由 `agent.claude.expected_version` 锁定 |
 | 产物存储 | **本地文件 + 数据库引用** | 大日志不进入上下文，也不进入数据库 |
 | 测试 | **go test + testify**（后端）；**Vitest**（前端单测） | 分层；E2E 由 `make test-e2e` 驱动真实 daemon，不引入浏览器自动化 |
 | 部署 | **Docker Compose** | 服务、MySQL、Redis 可重复启动 |
@@ -753,7 +753,7 @@ INSERT activities(task_id, seq, event_id, kind, payload)
 | I | E2E、部署与文档收口 | 全部 | 6 | 8–12 人日 |
 
 **合计 102–154 人日**，不含组织审批与运维。按每包 1.2–1.8 人日估算（实现 + 单测 + 验收 + 证据归档）。
-**A–E（56 包）构成最小可用闭环，约 64–96 人日**；**F–I 属 v2**，在闭环验证后再投入。
+**A–E 扣除 C11（55 包）构成最小可用闭环，约 64–96 人日**；**C11 与 F–I 属 v2**，在闭环验证后再投入。
 
 > **工作包拆分**：6.2 将上述阶段拆为 **85 个工作包**（A 8 / B 11 / C 13 / D 14 / E 10 / F 8 / G 8 / H 7 / I 6），每包含目标、具体文件、函数签名、验收标准与可直接执行的测试命令。进度跟踪见 6.4。
 
@@ -964,7 +964,7 @@ INSERT activities(task_id, seq, event_id, kind, payload)
 **C9：上下文同步与版本缓存**
 - 目标：与 Server 双向同步 decisions / step_summary，本地维护版本。
 - 文件：`internal/daemon/contextsync.go`、`internal/daemon/meta.go`
-- 实现：`Pull()`、`PushDecisions()`、`PushSummary()`；`.context_versions.json` 读写
+- 实现：`Pull()`、`PushDecisions()`、`PushSummary()`；走 9.6.1 的 CLI HTTP API（`/contexts/{task}/{scope}/files`，`expectedVersion` CAS）；`.context_versions.json` 读写
 - 验收：本地版本落后时先拉取再合并；冲突时重读，不覆盖。
 - 测试：`go test ./internal/daemon -run TestContextSync -v`
 
@@ -975,7 +975,7 @@ INSERT activities(task_id, seq, event_id, kind, payload)
 - 验收：脏工作区不被清理；非计划分支拒绝推送；HEAD 与基线不一致时停止并回传证据。
 - 测试：`go test ./internal/daemon -run TestWorkspace -v`
 
-**C11：Flow 节点 Worker**
+**C11：Flow 节点 Worker（v2，随 G 阶段实现）**
 - 目标：领取并执行 `agent_prompt` 节点。
 - 文件：`internal/daemon/flownode.go`
 - 实现：`Claim()`、`Heartbeat(nodeID, lease)`、`Complete()`、`Fail()`、`CancelAck()`
@@ -2177,6 +2177,24 @@ Redis 承载**热状态**，MySQL 承载**可重建的冷数据**。
 | `STEP_NOT_RECONCILING` | 409 | 只有 reconciling 的步骤可人工裁决 | ❌ |
 | `INTERNAL_ERROR` | 500 | 服务端内部错误（不回显细节） | ✅（重试） |
 
+#### 9.6.1 CLI HTTP API（daemon → 控制面）
+
+与 9.7 的 WS 并行存在：**WS 只承载实时命令、事件与流；上下文、附件、Agent 配置与报告走 HTTP**。
+所有路径以 `api_url` 为基址、`/api/v1/cli` 为前缀，鉴权与 WS 相同（`Authorization: Bearer <machine_token>`）。
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| GET | `/machines/{mid}/agent-configs` | 拉取本机可用 Agent 配置（启动与配置变更时） |
+| POST | `/machines/{mid}/agents/register` | 上报本机可用的 Provider 与版本 |
+| GET | `/contexts/{taskID}/{scope}/files` | 读取上下文（decisions / step_summary 的版本列表） |
+| GET | `/contexts/{taskID}/{scope}/files/{kind}/{version}` | 读取指定版本内容 |
+| PUT | `/contexts/{taskID}/{scope}/files/{kind}` | 写入新版本（带 `expectedVersion` 做 CAS） |
+| GET | `/attachments/{id}` | 下载工具输出/附件 |
+| POST | `/machines/{mid}/report` | 上报执行结果、证据与用量 |
+| POST | `/machines/{mid}/responses/{commandID}` | 回传命令响应（长耗时命令的兜底通道） |
+
+错误体与 9.6 相同；机器令牌无效返回 401 `UNAUTHENTICATED`。
+
 **闭合规则**：本表是唯一错误码清单。任何接口返回的错误码必须在此表内；新增需同步更新本表与 5.7 的错误展示映射。
 
 ### 9.7 WebSocket 消息契约
@@ -2330,7 +2348,8 @@ type AgentEvent struct {
 **5. 会话、并发与恢复**
 
 - 同一 `sessionId` 同时只允许一个进行中的 `session/prompt`；第二个到达 → 以 `session_busy` 拒绝（WS `response.error`），**不排队**。ACP 会话本身串行，排队会让取消语义变复杂。
-- `session/prompt` 在 daemon 侧**不设超时**：执行可能持续数小时，存活性完全由租约心跳（9.8）判断；取消走 `session/cancel`。
+- `session/prompt` 受 `agent.<type>.input_timeout_seconds` 约束（默认 1800s，与参考实现一致）。超时先发 `session/cancel`，再以 `uncertain=true` 上报，交由 9.8.1 对账；**不能把超时当作"未执行"**。
+- v1 的 ACP 对端是 `@agentclientprotocol/claude-agent-acp`（版本由 `agent.claude.expected_version` 锁定）；适配器只做 ACP ↔ `AgentEvent` 映射，不改变本节约束。
 - 恢复顺序：E3 指纹匹配 → `session/load` 成功 → 复用；未声明 `loadSession` 或 load 失败 → **新建会话**（`session_ordinal + 1`）并写 `activities`（kind=`provider.resume_unsupported`），由 ContextAssembler 重新注入交接摘要。**不得静默降级成“看起来还在同一会话”**。
 - Provider 进程崩溃：`prompt` 以错误结束，daemon 上报 `step_fail{error_class=runtime, uncertain=<工作区是否有新提交>}`；`uncertain=true` 时 Server 走 9.8.1 对账，而不是直接 `failed`。
 - `stopReason` 映射（Provider 级例外优先于 3.4 的默认策略）：
@@ -2486,6 +2505,8 @@ context:
   tool_output_max_bytes: 32768
   reserve_output_tokens: 4096
   summary_only_when_dependency: true
+  recent_n: 3               # 注入的最近步骤摘要数量
+  recent_message_n: 5       # 交接时注入的最近消息数量
 
 storage:
   mysql_dsn: "${MYSQL_DSN}"
@@ -2497,9 +2518,16 @@ security:
   log_redaction: true
 
 daemon:
-  server_url: "${ALADDIN_SERVER_URL}"
+  acp_url: "${ALADDIN_ACP_URL}"   # WS：实时命令/事件
+  api_url: "${ALADDIN_API_URL}"   # HTTP：CLI API（9.6.1）
   profile_dir: "~/.aladdin/profiles"
   # 机器令牌只从环境变量 ALADDIN_MACHINE_TOKEN 读取，不写入本文件
+
+agent:
+  claude:
+    bin: ""                       # 空则从 PATH 解析 claude-agent-acp
+    expected_version: "0.94.0"
+    input_timeout_seconds: 1800
 
 acp:
   initialize_timeout: 3s
@@ -2528,7 +2556,7 @@ acp:
 
 | 范围 | 包数 | 工作量 | 参考行数 |
 |---|---|---|---|
-| A–E（最小可用闭环，对应 1.3 的 MVP） | 56 | **64–96 人日** | 约 8,000–12,000 行 Go |
+| A–E（最小可用闭环，对应 1.3 的 MVP，扣除 C11） | 55 | **64–96 人日** | 约 8,000–12,000 行 Go |
 | A–I 全量 | 85 | **102–154 人日** | 约 15,000–22,000 行 Go |
 
 行数为粗估（含测试），**不具有决策价值，仅用于判断是否被严重低估**；以人日为准。
