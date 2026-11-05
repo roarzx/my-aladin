@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,6 +145,15 @@ func TestProposeConfirmStart(t *testing.T) {
 	started, err := svc.Start(ctx, f.taskID, task.Version)
 	if err != nil || started.Status != domain.TaskExecuting {
 		t.Fatalf("Start: %+v, err=%v", started, err)
+	}
+	// D13：启动时分配计划分支（aladdin/<taskid 前 8 位>），且可重复读取
+	wantBranch := "aladdin/" + strings.ReplaceAll(f.taskID, "-", "")[:8]
+	if started.PlanBranch != wantBranch {
+		t.Fatalf("PlanBranch = %q, 期望 %q", started.PlanBranch, wantBranch)
+	}
+	persisted, err := mysqlstore.GetTask(ctx, f.db, f.taskID)
+	if err != nil || persisted.PlanBranch != wantBranch {
+		t.Fatalf("持久化 PlanBranch = %q, err=%v", persisted.PlanBranch, err)
 	}
 	// 再次启动 → 冲突
 	if _, err := svc.Start(ctx, f.taskID, started.Version); !hasCode(err, errcode.Conflict) {

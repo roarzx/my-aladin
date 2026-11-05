@@ -359,3 +359,14 @@ func UpdateAttemptStatus(ctx context.Context, ex Executor, id string, status dom
 	}
 	return nil
 }
+
+// SetTaskPlanBranch 仅在任务尚未设置分支时写入。
+func SetTaskPlanBranch(ctx context.Context, ex Executor, taskID, branch string) error {
+	_, err := ex.ExecContext(ctx, `
+		UPDATE tasks SET plan_branch = ?
+		WHERE id = ? AND (plan_branch IS NULL OR plan_branch = '')`, branch, taskID)
+	if err != nil {
+		return fmt.Errorf("设置任务分支: %w", err)
+	}
+	return nil
+}

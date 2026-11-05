@@ -15,6 +15,7 @@ import (
 
 	"github.com/roarzx/my-aladin/internal/buildinfo"
 	"github.com/roarzx/my-aladin/internal/config"
+	"github.com/roarzx/my-aladin/internal/transport/acp"
 )
 
 // Options 是 daemon 的启动参数。
@@ -67,7 +68,22 @@ func Run(ctx context.Context, opts Options) error {
 	defer janitor.Stop()
 	defer func() { _ = reaper.StopAll() }()
 
-	dispatcher := NewDispatcher(idempotent, nil, slog.Default())
+	agentRuntime, ok := cfg.Agents["claude"]
+	if !ok {
+		return errors.New("agent.claude: 未配置")
+	}
+	stepHandler := &StepHandler{
+		ProviderConfig: acp.Config{
+			Bin:               agentRuntime.Bin,
+			ExpectedVersion:   agentRuntime.ExpectedVersion,
+			Cwd:               profile.Dir,
+			InitializeTimeout: cfg.ACP.InitializeTimeout.Std(),
+			InputTimeout:      time.Duration(agentRuntime.InputTimeoutSeconds) * time.Second,
+		},
+		Spawner: reaper,
+		Log:     slog.Default(),
+	}
+	dispatcher := NewDispatcher(idempotent, stepHandler.Handle, slog.Default())
 
 	client := NewClient(ClientOptions{
 		ACPURL:            cfg.Daemon.ACPURL,

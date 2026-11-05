@@ -97,9 +97,24 @@ func PutContextVersion(ctx context.Context, ex Executor, taskID, scopeKind, scop
 	}
 
 	sum := sha256.Sum256([]byte(content))
+	hash := hex.EncodeToString(sum[:])
+	if current > 0 {
+		var latestHash string
+		err := ex.QueryRowContext(ctx, `
+			SELECT content_hash FROM context_entries
+			WHERE task_id = ? AND scope_kind = ? AND scope_id = ? AND kind = ? AND version = ?`,
+			taskID, scopeKind, scopeID, kind, current).Scan(&latestHash)
+		if err == nil && latestHash == hash {
+			// 内容未变化：不升版本（D12：按 digest 判重）
+			return ContextEntry{
+				TaskID: taskID, ScopeKind: scopeKind, ScopeID: scopeID, Kind: kind,
+				Version: current, Content: content, ContentHash: hash,
+			}, nil
+		}
+	}
 	entry := ContextEntry{
 		TaskID: taskID, ScopeKind: scopeKind, ScopeID: scopeID, Kind: kind,
-		Version: current + 1, Content: content, ContentHash: hex.EncodeToString(sum[:]),
+		Version: current + 1, Content: content, ContentHash: hash,
 	}
 	_, err = ex.ExecContext(ctx, `
 		INSERT INTO context_entries (id, task_id, scope_kind, scope_id, kind, version, content, content_hash)

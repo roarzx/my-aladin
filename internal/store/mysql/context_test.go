@@ -40,6 +40,15 @@ func TestContextVersionCAS(t *testing.T) {
 		t.Fatalf("写入 v2: %+v, err=%v", entry, err)
 	}
 
+	// D12：内容未变化时不升版本，直接返回当前版本
+	same, err := mysqlstore.PutContextVersion(ctx, tx, taskID, scope, taskID, kind, "v2", 2)
+	if err != nil || same.Version != 2 {
+		t.Fatalf("相同内容写入: %+v, err=%v", same, err)
+	}
+	if current, err := mysqlstore.CurrentContextVersion(ctx, tx, taskID, scope, taskID, kind); err != nil || current != 2 {
+		t.Fatalf("去重后版本 = %d, err=%v", current, err)
+	}
+
 	got, err := mysqlstore.GetContextVersion(ctx, tx, taskID, scope, taskID, kind, 2)
 	if err != nil || got.Content != "v2" || got.ContentHash == "" {
 		t.Fatalf("读取 v2: %+v, err=%v", got, err)

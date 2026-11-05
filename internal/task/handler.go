@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 
@@ -20,9 +21,11 @@ type Creator interface {
 	Create(ctx context.Context, creatorID uint64, workspaceID string, req CreateRequest) (*domain.Task, error)
 }
 
-// Handler 提供 POST /workspaces/{wid}/issues。
+// Handler 提供 POST /workspaces/{wid}/issues 与 GET /issues/{id}。
 type Handler struct {
 	Service Creator
+	DB      *sql.DB
+	Members MemberLookup
 }
 
 // Create 处理创建任务请求。

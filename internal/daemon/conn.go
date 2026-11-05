@@ -206,7 +206,8 @@ func (c *Client) handleCommand(ctx context.Context, writer *envelopeWriter, env 
 		Error:    &protocol.ResponseError{Code: "unsupported_method", Message: "未注册命令处理器"},
 	}
 	if c.opts.OnCommand != nil {
-		out, err := c.opts.OnCommand(ctx, env)
+		sender := &connSender{writer: writer, traceID: env.TraceID}
+		out, err := c.opts.OnCommand(WithSender(ctx, sender), env)
 		if err != nil {
 			payload = protocol.ResponsePayload{
 				Accepted: false,

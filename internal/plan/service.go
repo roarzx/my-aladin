@@ -215,6 +215,13 @@ func (s *Service) Start(ctx context.Context, taskID string, expectedVersion uint
 	if _, err := mysqlstore.UpdatePlanState(ctx, tx, plan.ID, plan.Status, domain.PlanExecuting, plan.Version); err != nil {
 		return domain.Task{}, err
 	}
+	if strings.TrimSpace(task.PlanBranch) == "" {
+		branch := "aladdin/" + strings.ReplaceAll(taskID, "-", "")[:8]
+		if err := mysqlstore.SetTaskPlanBranch(ctx, tx, taskID, branch); err != nil {
+			return domain.Task{}, errcode.New(errcode.UpstreamUnavailable, "设置计划分支失败")
+		}
+		task.PlanBranch = branch
+	}
 
 	before, version := task.Status, task.Version
 	if err := task.Apply(domain.EvPlanConfirmedAndStarted); err != nil {

@@ -137,6 +137,7 @@ func run(cfgPath string) error {
 		DB: db, Members: &mysqlstore.WorkspaceStore{DB: db}, Service: retryService,
 	}
 	activityHandler := &activity.Handler{DB: db, Members: &mysqlstore.WorkspaceStore{DB: db}}
+	taskHandler := &task.Handler{Service: taskService, DB: db, Members: &mysqlstore.WorkspaceStore{DB: db}}
 	planHandler := &plan.Handler{
 		DB:      db,
 		Members: &mysqlstore.WorkspaceStore{DB: db},
@@ -176,6 +177,8 @@ func run(cfgPath string) error {
 			})
 		},
 		RegisterGlobal: func(r chi.Router) {
+			r.Get("/issues/{id}", taskHandler.Get)
+			r.Get("/issues/{id}/plans/{rev}", planHandler.Get)
 			r.Post("/issues/{id}/plans", planHandler.Submit)
 			r.Post("/plans/{id}/confirm", planHandler.Confirm)
 			r.Post("/issues/{id}/start", planHandler.Start)
