@@ -29,8 +29,10 @@ import (
 	"github.com/roarzx/my-aladin/internal/machine"
 	"github.com/roarzx/my-aladin/internal/orchestration"
 	"github.com/roarzx/my-aladin/internal/plan"
+	"github.com/roarzx/my-aladin/internal/recovery"
 	"github.com/roarzx/my-aladin/internal/session"
 	mysqlstore "github.com/roarzx/my-aladin/internal/store/mysql"
+	redisstore "github.com/roarzx/my-aladin/internal/store/redis"
 	"github.com/roarzx/my-aladin/internal/task"
 	"github.com/roarzx/my-aladin/internal/transport/ws"
 	"github.com/roarzx/my-aladin/migrations"
@@ -115,12 +117,23 @@ func run(cfgPath string) error {
 	}
 
 	hub := ws.NewHub(slog.Default())
+	lease := &orchestration.Lease{
+		DB:    db,
+		Store: redisstore.NewLeaseStore(rdb),
+		TTL:   cfg.Scheduler.AttemptLeaseTTL.Std(),
+		Log:   slog.Default(),
+	}
 	runner := &orchestration.PlanRunner{
 		DB: db, Runtime: hub, Owner: "server",
-		Lock: orchestration.NewTaskLock(rdb, cfg.Scheduler.TaskLockTTL.Std(), cfg.Scheduler.TaskLockRenew.Std()),
-		Log:  slog.Default(),
+		Lock:  orchestration.NewTaskLock(rdb, cfg.Scheduler.TaskLockTTL.Std(), cfg.Scheduler.TaskLockRenew.Std()),
+		Lease: lease,
+		Log:   slog.Default(),
 	}
-	hub.OnEvent = (&orchestration.EventHandler{DB: db, Runner: runner, Log: slog.Default()}).Handle
+	eventHandler := &orchestration.EventHandler{DB: db, Runner: runner, Log: slog.Default()}
+	hub.OnEvent = eventHandler.Handle
+	hub.Lease = lease
+	canceller := &orchestration.Canceller{DB: db, Runtime: hub, Log: slog.Default()}
+	reconciler := &recovery.Reconciler{DB: db, Handlers: eventHandler}
 
 	taskService := &task.Service{DB: db}
 	sessionService := &session.Service{DB: db, Dispatcher: hub}
@@ -138,6 +151,12 @@ func run(cfgPath string) error {
 	}
 	activityHandler := &activity.Handler{DB: db, Members: &mysqlstore.WorkspaceStore{DB: db}}
 	taskHandler := &task.Handler{Service: taskService, DB: db, Members: &mysqlstore.WorkspaceStore{DB: db}}
+	cancelHandler := &orchestration.CancelHandler{
+		Members: &mysqlstore.WorkspaceStore{DB: db}, Canceller: canceller,
+	}
+	reconcileHandler := &recovery.Handler{
+		DB: db, Members: &mysqlstore.WorkspaceStore{DB: db}, Reconciler: reconciler,
+	}
 	planHandler := &plan.Handler{
 		DB:      db,
 		Members: &mysqlstore.WorkspaceStore{DB: db},
@@ -180,6 +199,8 @@ func run(cfgPath string) error {
 			r.Get("/issues/{id}", taskHandler.Get)
 			r.Get("/issues/{id}/plans/{rev}", planHandler.Get)
 			r.Post("/issues/{id}/plans", planHandler.Submit)
+			r.Post("/issues/{id}/cancel", cancelHandler.Cancel)
+			r.Post("/steps/{id}/reconcile", reconcileHandler.Reconcile)
 			r.Post("/plans/{id}/confirm", planHandler.Confirm)
 			r.Post("/issues/{id}/start", planHandler.Start)
 			r.Post("/steps/{id}/retry", retryHandler.Retry)
@@ -194,6 +215,12 @@ func run(cfgPath string) error {
 	loopCtx, cancelLoop := context.WithCancel(context.Background())
 	defer cancelLoop()
 	go (&orchestration.Loop{DB: db, Runner: runner, Interval: time.Second, Log: slog.Default()}).Run(loopCtx)
+	go (&recovery.Watchdog{
+		DB: db, Runner: runner, Lease: lease, Canceller: canceller,
+		CancelTimeout: cfg.Scheduler.CancelTimeout.Std(),
+		Interval:      cfg.Scheduler.RecoveryScanInterval.Std(),
+		Log:           slog.Default(),
+	}).Run(loopCtx)
 
 	srv := &http.Server{
 		Addr:              cfg.Server.HTTPAddr,

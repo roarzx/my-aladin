@@ -12,8 +12,10 @@ type DispatchRequest struct {
 	TaskID      string
 	StepID      string
 	AttemptNo   uint32
-	Branch      string
-	Prompt      string
+	// LeaseEpoch 是本次尝试的执行租约代次（心跳续约时校验）。
+	LeaseEpoch uint64
+	Branch     string
+	Prompt     string
 }
 
 // ExecutionState 是执行快照状态。

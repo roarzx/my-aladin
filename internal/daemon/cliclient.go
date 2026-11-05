@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,11 +12,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/roarzx/my-aladin/internal/agentctx"
 	"github.com/roarzx/my-aladin/pkg/errcode"
 )
 
 // ErrContextConflict 表示服务端上下文版本冲突（HTTP 409）。
-var ErrContextConflict = errors.New("context: 版本冲突")
+//
+// 与 agentctx.ErrVersionConflict 是同一哨兵：上下文仲裁统一走 agentctx（E1）。
+var ErrContextConflict = agentctx.ErrVersionConflict
 
 // CLIClient 是 daemon → 控制面的 CLI HTTP API 客户端（9.6.1）。
 type CLIClient struct {

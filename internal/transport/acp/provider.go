@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -302,7 +303,9 @@ func (s *Session) Prompt(ctx context.Context, text string, onEvent func(agenteve
 	if err != nil {
 		if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
 			_ = s.Cancel(context.Background())
-			return Result{}, ErrPromptTimeout
+			// 同时保留 ErrPromptTimeout（uncertain 判定）与网络类错误码（E7 分类）
+			return Result{}, fmt.Errorf("%w: %w", ErrPromptTimeout,
+				errcode.New(errcode.ResultUnknown, "prompt 超时，结果未知"))
 		}
 		return Result{}, err
 	}

@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/roarzx/my-aladin/internal/idgen"
+	"github.com/roarzx/my-aladin/internal/orchestration"
 	"github.com/roarzx/my-aladin/internal/runtime"
 	"github.com/roarzx/my-aladin/internal/session"
 	"github.com/roarzx/my-aladin/pkg/errcode"
@@ -25,6 +26,8 @@ type Hub struct {
 	execMachines map[string]string
 
 	log *slog.Logger
+	// Lease 用于心跳续约（E4）；为空时忽略心跳中的 active_executions。
+	Lease *orchestration.Lease
 	// OnEvent 处理 daemon 上行的非响应消息（step_done / step_fail 等）。
 	OnEvent func(ctx context.Context, machineID string, env protocol.Envelope) error
 }
@@ -48,13 +51,16 @@ func (h *Hub) Handler(ctx context.Context, machineID string, conn *Conn) error {
 
 func (h *Hub) serve(ctx context.Context, machineID string, conn EnvelopeConn) error {
 	wsSession := NewSession(conn)
-	if h.OnEvent != nil {
-		wsSession.OnEnvelope(func(env protocol.Envelope) {
+	wsSession.OnEnvelope(func(env protocol.Envelope) {
+		if env.Type == protocol.TypeHeartbeat {
+			h.handleHeartbeat(ctx, env)
+		}
+		if h.OnEvent != nil {
 			if err := h.OnEvent(ctx, machineID, env); err != nil {
 				h.log.Warn("处理事件失败", "machine", machineID, "err", err)
 			}
-		})
-	}
+		}
+	})
 
 	h.mu.Lock()
 	h.sessions[machineID] = wsSession
@@ -95,6 +101,7 @@ func (h *Hub) Dispatch(ctx context.Context, req runtime.DispatchRequest) (string
 		"task_id":      req.TaskID,
 		"step_id":      req.StepID,
 		"attempt_no":   req.AttemptNo,
+		"lease_epoch":  req.LeaseEpoch,
 		"branch":       req.Branch,
 		"prompt":       req.Prompt,
 	})
@@ -131,6 +138,31 @@ func (h *Hub) Dispatch(ctx context.Context, req runtime.DispatchRequest) (string
 	h.execMachines[req.ExecutionID] = req.MachineID
 	h.mu.Unlock()
 	return req.ExecutionID, nil
+}
+
+// heartbeatData 是 daemon 心跳中与租约相关的字段（9.7）。
+type heartbeatData struct {
+	ActiveExecutions []struct {
+		ExecutionID string `json:"execution_id"`
+		LeaseEpoch  uint64 `json:"lease_epoch"`
+	} `json:"active_executions"`
+}
+
+// handleHeartbeat 按 execution_id 续约；epoch 不等于当前代次则拒绝（旧心跳不得恢复资格）。
+func (h *Hub) handleHeartbeat(ctx context.Context, env protocol.Envelope) {
+	if h.Lease == nil || len(env.Payload) == 0 {
+		return
+	}
+	var payload heartbeatData
+	if err := json.Unmarshal(env.Payload, &payload); err != nil {
+		return
+	}
+	for _, active := range payload.ActiveExecutions {
+		if err := h.Lease.RenewByExecution(ctx, active.ExecutionID, active.LeaseEpoch); err != nil {
+			h.log.Debug("续约被拒绝", "execution", active.ExecutionID,
+				"epoch", active.LeaseEpoch, "err", err)
+		}
+	}
 }
 
 // Inspect 暂不维护执行快照（由 daemon 侧负责），返回 unknown。

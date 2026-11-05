@@ -30,6 +30,8 @@ type Section struct {
 // Bundle 是装配结果（有序）。
 type Bundle struct {
 	Sections []Section
+	// Trimmed 记录 Fit 执行的裁剪（budget.trimmed 审计）。
+	Trimmed []Trim
 }
 
 // Assemble 按 3.5 的顺序装配：约束 → 需求 → 决策 → 当前步骤 → 最近交互 → 历史。
@@ -53,9 +55,15 @@ func Assemble(req Request) Bundle {
 
 	decisions := make([]string, 0, len(req.Decisions))
 	for _, decision := range req.Decisions {
-		if strings.TrimSpace(decision.Text) != "" {
-			decisions = append(decisions, decision.Text)
+		if strings.TrimSpace(decision.Text) == "" {
+			continue
 		}
+		line := decision.Text
+		// 摘要必须能定位原始证据（dev_spec 3.5）
+		if len(decision.EvidenceIDs) > 0 {
+			line += "（证据：" + strings.Join(decision.EvidenceIDs, ", ") + "）"
+		}
+		decisions = append(decisions, line)
 	}
 	appendSection("已确认决策", decisions)
 

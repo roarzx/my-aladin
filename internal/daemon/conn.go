@@ -36,7 +36,9 @@ type ClientOptions struct {
 	MaxMessageBytes   int64
 	Backoff           Backoff
 	OnCommand         CommandHandler
-	Logger            *slog.Logger
+	// ActiveExecutions 返回本机正在执行的 execution（心跳续约）。
+	ActiveExecutions func() []ActiveExecution
+	Logger           *slog.Logger
 }
 
 // Client 是 daemon 侧的控制面连接（B/C2）：握手、心跳、重连与命令响应。
@@ -178,10 +180,20 @@ func (c *Client) heartbeat(ctx context.Context, writer *envelopeWriter) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			var active []ActiveExecution
+			if c.opts.ActiveExecutions != nil {
+				active = c.opts.ActiveExecutions()
+			}
+			payload, _ := json.Marshal(map[string]any{
+				"cli_version":       c.opts.CLIVersion,
+				"capabilities":      c.opts.Capabilities,
+				"active_executions": active,
+			})
 			if err := writer.send(protocol.Envelope{
 				Type:    protocol.TypeHeartbeat,
 				ID:      idgen.New(),
 				TraceID: idgen.New(),
+				Payload: payload,
 			}); err != nil {
 				c.log.Warn("发送心跳失败", "err", err)
 				_ = writer.conn.Close()

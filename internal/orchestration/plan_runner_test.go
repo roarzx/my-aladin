@@ -21,8 +21,9 @@ import (
 )
 
 type stubRuntime struct {
-	mu       sync.Mutex
-	requests []runtime.DispatchRequest
+	mu        sync.Mutex
+	requests  []runtime.DispatchRequest
+	cancelAck bool
 }
 
 func (s *stubRuntime) Dispatch(_ context.Context, req runtime.DispatchRequest) (string, error) {
@@ -36,7 +37,7 @@ func (s *stubRuntime) Inspect(context.Context, string) (runtime.ExecutionSnapsho
 	return runtime.ExecutionSnapshot{}, nil
 }
 
-func (s *stubRuntime) Cancel(context.Context, string) (bool, error) { return true, nil }
+func (s *stubRuntime) Cancel(context.Context, string) (bool, error) { return s.cancelAck, nil }
 
 func (s *stubRuntime) Capabilities() runtime.CapabilitySet { return runtime.CapabilitySet{} }
 

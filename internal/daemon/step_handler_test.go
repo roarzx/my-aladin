@@ -195,7 +195,7 @@ func TestStepHandlerReportsFailOnStartError(t *testing.T) {
 func TestStepHandlerRejectsUnknownMethod(t *testing.T) {
 	h := newTestStepHandler(t, "")
 	sender := newRecordingSender()
-	payload, _ := json.Marshal(protocol.CommandPayload{Method: "stop_session"})
+	payload, _ := json.Marshal(protocol.CommandPayload{Method: "bogus_method"})
 
 	out, err := h.Handle(WithSender(context.Background(), sender), protocol.Envelope{Type: protocol.TypeCommand, Payload: payload})
 	if err != nil {

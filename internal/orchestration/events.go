@@ -80,6 +80,13 @@ func (h *EventHandler) complete(ctx context.Context, env protocol.Envelope, data
 		h.log().Warn("步骤已非 executing，忽略 step_done", "step", step.ID, "status", step.Status)
 		return nil
 	}
+	// 围栏：只有该步骤的最新 attempt 能推进状态（旧执行迟到的回调只记日志）
+	latest, err := mysqlstore.GetLatestAttempt(ctx, h.DB, step.ID)
+	if err != nil || latest.ID != attempt.ID {
+		h.log().Warn("拒绝非当前 attempt 的 step_done",
+			"execution", env.ExecutionID, "attempt", attempt.AttemptNo)
+		return nil
+	}
 
 	if err := mysqlstore.UpdateAttemptStatus(ctx, h.DB, attempt.ID,
 		domain.AttemptCompleted, "", done.SummaryDigest, done.CommitSHA); err != nil {
@@ -153,6 +160,16 @@ func (h *EventHandler) fail(ctx context.Context, env protocol.Envelope, data jso
 		})
 	}
 	return h.pause(ctx, step.PlanID)
+}
+
+// AdvancePlan 供对账等路径复用计划推进（E6）。
+func (h *EventHandler) AdvancePlan(ctx context.Context, planID string) error {
+	return h.advance(ctx, planID)
+}
+
+// PausePlan 供对账等路径复用计划暂停（E6）。
+func (h *EventHandler) PausePlan(ctx context.Context, planID string) error {
+	return h.pause(ctx, planID)
 }
 
 // advance 在步骤完成后决定下一步：还有其他步骤就继续派发，否则完成计划。

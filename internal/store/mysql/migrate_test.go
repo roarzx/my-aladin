@@ -58,7 +58,7 @@ func TestMigrateUpDownUp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("打开测试库: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	var tables int
 	if err := db.QueryRow(

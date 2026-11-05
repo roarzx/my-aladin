@@ -8,9 +8,22 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/roarzx/my-aladin/internal/agentctx"
 )
 
 const contextVersionsFile = ".context_versions.json"
+
+// contextAPI 把 CLIClient 适配为 agentctx.VersionedClient（E1）。
+type contextAPI struct{ client *CLIClient }
+
+func (a contextAPI) GetLatest(ctx context.Context, taskID, scopeKind, scopeID, kind string) (string, int, error) {
+	return a.client.GetLatest(ctx, taskID, scopeKind, scopeID, kind)
+}
+
+func (a contextAPI) Put(ctx context.Context, taskID, scopeKind, scopeID, kind, content string, expectedVersion int) (int, error) {
+	return a.client.PutContext(ctx, taskID, scopeKind, scopeID, kind, content, expectedVersion)
+}
 
 type contextVersions struct {
 	Versions map[string]int `json:"versions"`
@@ -82,18 +95,9 @@ func (s *ContextSync) Push(
 	merge func(remote string) (string, error),
 ) (int, error) {
 	expected := s.LocalVersion(kind, scopeID)
-	version, err := s.client.PutContext(ctx, taskID, scope, scopeID, kind, content, expected)
-	if errors.Is(err, ErrContextConflict) && merge != nil {
-		remote, remoteVersion, getErr := s.client.GetLatest(ctx, taskID, scope, scopeID, kind)
-		if getErr != nil {
-			return 0, getErr
-		}
-		merged, mergeErr := merge(remote)
-		if mergeErr != nil {
-			return 0, mergeErr
-		}
-		version, err = s.client.PutContext(ctx, taskID, scope, scopeID, kind, merged, remoteVersion)
-	}
+	version, err := agentctx.MergeAndPut(ctx, contextAPI{s.client}, agentctx.Entry{
+		TaskID: taskID, ScopeKind: scope, ScopeID: scopeID, Kind: kind, Content: content,
+	}, expected, merge)
 	if err != nil {
 		return 0, err
 	}

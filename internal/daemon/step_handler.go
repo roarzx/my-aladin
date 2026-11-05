@@ -10,6 +10,7 @@ import (
 
 	"github.com/roarzx/my-aladin/internal/agentevent"
 	"github.com/roarzx/my-aladin/internal/transport/acp"
+	"github.com/roarzx/my-aladin/pkg/errcode"
 	"github.com/roarzx/my-aladin/pkg/protocol"
 )
 
@@ -17,7 +18,9 @@ import (
 type StepHandler struct {
 	ProviderConfig acp.Config
 	Spawner        acp.Spawner
-	Log            *slog.Logger
+	// Running 登记本机执行，供心跳续约与 stop_session 使用（E4/E9）。
+	Running *RunningExecutions
+	Log     *slog.Logger
 }
 
 type stepParams struct {
@@ -25,6 +28,7 @@ type stepParams struct {
 	TaskID      string `json:"task_id"`
 	StepID      string `json:"step_id"`
 	AttemptNo   uint32 `json:"attempt_no"`
+	LeaseEpoch  uint64 `json:"lease_epoch"`
 	Branch      string `json:"branch"`
 	Prompt      string `json:"prompt"`
 }
@@ -35,28 +39,56 @@ func (h *StepHandler) Handle(ctx context.Context, env protocol.Envelope) (protoc
 	if err := json.Unmarshal(env.Payload, &command); err != nil {
 		return rejected("invalid_command", "payload 不合法"), nil
 	}
-	if command.Method != "start_step_session" {
+	switch command.Method {
+	case "start_step_session":
+		return h.start(ctx, command.Params), nil
+	case "stop_session":
+		var params struct {
+			ExecutionID string `json:"execution_id"`
+		}
+		if err := json.Unmarshal(command.Params, &params); err != nil || params.ExecutionID == "" {
+			return rejected("invalid_params", "params 不合法"), nil
+		}
+		if h.Running == nil || !h.Running.Cancel(params.ExecutionID) {
+			return rejected("not_running", "执行不在本机运行"), nil
+		}
+		return protocol.ResponsePayload{Accepted: true}, nil
+	default:
 		return rejected("unsupported_method", "未注册命令: "+command.Method), nil
 	}
+}
+
+func (h *StepHandler) start(ctx context.Context, raw json.RawMessage) protocol.ResponsePayload {
 	var params stepParams
-	if err := json.Unmarshal(command.Params, &params); err != nil {
-		return rejected("invalid_params", "params 不合法"), nil
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return rejected("invalid_params", "params 不合法")
 	}
 	sender, ok := SenderFrom(ctx)
 	if !ok {
-		return rejected("no_channel", "连接不支持事件回传"), nil
+		return rejected("no_channel", "连接不支持事件回传")
 	}
 
 	go h.run(ctx, params, sender)
-	return protocol.ResponsePayload{Accepted: true}, nil
+	return protocol.ResponsePayload{Accepted: true}
 }
 
 func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if h.Running != nil {
+		epoch := params.LeaseEpoch
+		if epoch == 0 {
+			epoch = 1
+		}
+		unregister := h.Running.Start(params.ExecutionID, epoch, cancel)
+		defer unregister()
+	}
+
 	provider := acp.NewProvider(h.ProviderConfig, h.Spawner, h.log())
 
 	session, err := provider.Start(ctx)
 	if err != nil {
-		h.fail(sender, params, "runtime", false, err)
+		h.fail(sender, params, string(errcode.Classify(err)), false, err)
 		return
 	}
 	defer func() { _ = session.Close() }()
@@ -70,7 +102,7 @@ func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender)
 			seq.Add(1), event.Text, false)
 	})
 	if err != nil {
-		h.fail(sender, params, "runtime", isUncertain(err), err)
+		h.fail(sender, params, string(errcode.Classify(err)), isUncertain(err), err)
 		return
 	}
 

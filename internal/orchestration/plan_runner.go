@@ -19,6 +19,7 @@ type PlanRunner struct {
 	Runtime runtime.Runtime
 	Owner   string
 	Lock    *TaskLock
+	Lease   *Lease
 	Log     *slog.Logger
 }
 
@@ -101,6 +102,15 @@ func (r *PlanRunner) RunOnce(ctx context.Context, taskID string) error {
 			domain.StepExecuting, domain.StepFailed, next.Version)
 		return err
 	}
+	if r.Lease != nil {
+		if err := r.Lease.Acquire(ctx, attempt); err != nil {
+			_, _ = mysqlstore.UpdateStepState(ctx, r.DB, next.ID,
+				domain.StepExecuting, domain.StepFailed, next.Version)
+			_ = mysqlstore.UpdateAttemptStatus(ctx, r.DB, attempt.ID,
+				domain.AttemptFailed, domain.ErrRuntime, "", "")
+			return err
+		}
+	}
 
 	if r.Runtime != nil {
 		_, dispatchErr := r.Runtime.Dispatch(ctx, runtime.DispatchRequest{
@@ -109,6 +119,7 @@ func (r *PlanRunner) RunOnce(ctx context.Context, taskID string) error {
 			TaskID:      taskID,
 			StepID:      next.ID,
 			AttemptNo:   attemptNo,
+			LeaseEpoch:  attempt.LeaseEpoch,
 			Branch:      task.PlanBranch,
 		})
 		if dispatchErr != nil {

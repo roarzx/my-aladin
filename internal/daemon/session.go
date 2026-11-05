@@ -19,6 +19,9 @@ type SessionRecord struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+// SessionFingerprint 暴露指纹，满足 session.ResumableSession（E3）。
+func (r SessionRecord) SessionFingerprint() string { return r.Fingerprint }
+
 type sessionFile struct {
 	Version  int                      `json:"version"`
 	Sessions map[string]SessionRecord `json:"sessions"`

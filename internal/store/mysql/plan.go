@@ -370,3 +370,110 @@ func SetTaskPlanBranch(ctx context.Context, ex Executor, taskID, branch string) 
 	}
 	return nil
 }
+
+// ListActiveAttempts 列出可能仍在执行的尝试（租约扫描用，E4/E5）。
+func ListActiveAttempts(ctx context.Context, ex Executor, limit int) ([]domain.Attempt, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := ex.QueryContext(ctx, `
+		SELECT id, step_id, attempt_no, execution_id, lease_epoch, status
+		FROM attempts WHERE status IN ('dispatched', 'running')
+		ORDER BY created_at LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("列出活跃尝试: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []domain.Attempt
+	for rows.Next() {
+		var (
+			attempt domain.Attempt
+			status  string
+		)
+		if err := rows.Scan(&attempt.ID, &attempt.StepID, &attempt.AttemptNo,
+			&attempt.ExecutionID, &attempt.LeaseEpoch, &status); err != nil {
+			return nil, err
+		}
+		attempt.Status = domain.AttemptStatus(status)
+		out = append(out, attempt)
+	}
+	return out, rows.Err()
+}
+
+// GetAttemptByID 读取尝试。
+func GetAttemptByID(ctx context.Context, ex Executor, attemptID string) (domain.Attempt, error) {
+	var (
+		attempt domain.Attempt
+		status  string
+	)
+	err := ex.QueryRowContext(ctx, `
+		SELECT id, step_id, attempt_no, execution_id, lease_epoch, status
+		FROM attempts WHERE id = ?`, attemptID).Scan(
+		&attempt.ID, &attempt.StepID, &attempt.AttemptNo, &attempt.ExecutionID,
+		&attempt.LeaseEpoch, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Attempt{}, sql.ErrNoRows
+	}
+	if err != nil {
+		return domain.Attempt{}, fmt.Errorf("读取执行尝试: %w", err)
+	}
+	attempt.Status = domain.AttemptStatus(status)
+	return attempt, nil
+}
+
+// GetLatestAttempt 读取步骤的最新尝试。
+func GetLatestAttempt(ctx context.Context, ex Executor, stepID string) (domain.Attempt, error) {
+	var attemptID string
+	err := ex.QueryRowContext(ctx,
+		`SELECT id FROM attempts WHERE step_id = ? ORDER BY attempt_no DESC LIMIT 1`, stepID).Scan(&attemptID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Attempt{}, sql.ErrNoRows
+	}
+	if err != nil {
+		return domain.Attempt{}, fmt.Errorf("读取最新尝试: %w", err)
+	}
+	return GetAttemptByID(ctx, ex, attemptID)
+}
+
+// SetReconcileVerdict 记录人工对账结论（仅对结果未知的尝试生效）。
+func SetReconcileVerdict(ctx context.Context, ex Executor, attemptID string, verdict string) error {
+	if verdict != "completed" && verdict != "failed" {
+		return fmt.Errorf("对账结论只能是 completed/failed: %q", verdict)
+	}
+	res, err := ex.ExecContext(ctx, `
+		UPDATE attempts SET reconcile_verdict = ? WHERE id = ? AND status = 'unknown'`,
+		verdict, attemptID)
+	if err != nil {
+		return fmt.Errorf("写入对账结论: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return errcode.New(errcode.StepNotReconciling, "尝试不在待对账状态")
+	}
+	return nil
+}
+
+// SetCancelRequested 把任务置为 cancelling 并记录请求时间（E9）。
+func SetCancelRequested(ctx context.Context, ex Executor, taskID string,
+	from domain.TaskStatus, expectedVersion uint64) (uint64, error) {
+	res, err := ex.ExecContext(ctx, `
+		UPDATE tasks SET status = 'cancelling', cancel_requested_at = UTC_TIMESTAMP(3),
+			version = version + 1, updated_at = UTC_TIMESTAMP(3)
+		WHERE id = ? AND status = ? AND version = ?`,
+		taskID, string(from), expectedVersion)
+	if err != nil {
+		return 0, fmt.Errorf("发起取消: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if affected == 0 {
+		return 0, errcode.New(errcode.Conflict, "任务状态或版本已变化")
+	}
+	return expectedVersion + 1, nil
+}

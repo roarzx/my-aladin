@@ -72,6 +72,7 @@ func Run(ctx context.Context, opts Options) error {
 	if !ok {
 		return errors.New("agent.claude: 未配置")
 	}
+	running := NewRunningExecutions()
 	stepHandler := &StepHandler{
 		ProviderConfig: acp.Config{
 			Bin:               agentRuntime.Bin,
@@ -81,6 +82,7 @@ func Run(ctx context.Context, opts Options) error {
 			InputTimeout:      time.Duration(agentRuntime.InputTimeoutSeconds) * time.Second,
 		},
 		Spawner: reaper,
+		Running: running,
 		Log:     slog.Default(),
 	}
 	dispatcher := NewDispatcher(idempotent, stepHandler.Handle, slog.Default())
@@ -95,6 +97,7 @@ func Run(ctx context.Context, opts Options) error {
 		MaxMessageBytes:   cfg.ACP.MaxMessageBytes,
 		Backoff:           Backoff{Base: 500 * time.Millisecond, Max: 30 * time.Second},
 		OnCommand:         dispatcher.Handle,
+		ActiveExecutions:  running.Snapshot,
 	})
 
 	slog.Info("daemon 启动",

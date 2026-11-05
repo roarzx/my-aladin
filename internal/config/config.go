@@ -71,6 +71,7 @@ type SchedulerConfig struct {
 	TaskLockRenew         Duration `yaml:"task_lock_renew"`
 	AttemptLeaseTTL       Duration `yaml:"attempt_lease_ttl"`
 	RecoveryScanInterval  Duration `yaml:"recovery_scan_interval"`
+	CancelTimeout         Duration `yaml:"cancel_timeout"`
 	MaxAttemptsPerStep    int      `yaml:"max_attempts_per_step"`
 }
 
@@ -128,6 +129,7 @@ func Default() *Config {
 			TaskLockRenew:         Duration(10 * time.Second),
 			AttemptLeaseTTL:       Duration(60 * time.Second),
 			RecoveryScanInterval:  Duration(30 * time.Second),
+			CancelTimeout:         Duration(60 * time.Second),
 			MaxAttemptsPerStep:    3,
 		},
 		Context: ContextConfig{
@@ -248,6 +250,7 @@ func (c *Config) ValidateFor(role Role) error {
 	}
 	positive("scheduler.task_lock_ttl", c.Scheduler.TaskLockTTL.Std())
 	positive("scheduler.task_lock_renew", c.Scheduler.TaskLockRenew.Std())
+	positive("scheduler.cancel_timeout", c.Scheduler.CancelTimeout.Std())
 	if c.Scheduler.TaskLockRenew.Std() >= c.Scheduler.TaskLockTTL.Std() {
 		errs = append(errs, fmt.Errorf("scheduler.task_lock_renew: 必须小于 task_lock_ttl"))
 	}

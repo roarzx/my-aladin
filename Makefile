@@ -48,7 +48,7 @@ migrate:
 
 test-integration:
 	TEST_MYSQL_DSN='$(DSN)' TEST_REDIS_ADDR='$(REDIS)' \
-		$(GO) test -tags=integration ./... -count=1
+		$(GO) test -tags=integration ./... -count=1 -p 1
 
 # 本地一键验证：起依赖 → 迁移 → 集成测试 → 单测
 verify: up migrate test-integration test
