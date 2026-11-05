@@ -24,6 +24,10 @@ const usage = `aladdin — 运维 CLI
   version            打印版本
   migrate            执行数据库迁移（--dsn 或环境变量 MYSQL_DSN）
   machine token      为机器签发一次性令牌（明文只打印一次）
+  squad action       推进工作项（start|complete|block|cancel）
+  squad handoff      交接工作项负责人
+  squad context      读取 Agent 上下文
+  squad artifact     按字节区间读取方案内容
   daemon status      查看本机 daemon 状态（C 阶段实现）
   daemon logs        查看 daemon 日志（C 阶段实现）
   reset              清空本地运行状态（C 阶段实现，危险）
@@ -43,6 +47,8 @@ func main() {
 		err = runMigrate(os.Args[2:])
 	case "machine":
 		err = runMachine(os.Args[2:])
+	case "squad":
+		err = runSquad(os.Args[2:])
 	case "daemon":
 		err = errors.New("daemon 子命令在 C 阶段实现")
 	case "reset":

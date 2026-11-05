@@ -13,7 +13,7 @@ import (
 // Loop 周期性推进所有 executing 任务（D8 的驱动者）。
 type Loop struct {
 	DB       *sql.DB
-	Runner   *PlanRunner
+	Runner   Runner
 	Interval time.Duration
 	Log      *slog.Logger
 }

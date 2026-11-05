@@ -42,9 +42,38 @@ func TestNormalizeAndValidate(t *testing.T) {
 			wantCode: errcode.ValidationFailed,
 		},
 		{
-			name:     "v1 不支持小队模式",
-			mutate:   func(r *CreateRequest) { r.Mode = domain.ModeSquad },
+			name: "squad 模式缺少 squadId",
+			mutate: func(r *CreateRequest) {
+				r.Mode = domain.ModeSquad
+				r.AgentIDs = nil
+				r.PlannerAgentID = ""
+			},
 			wantCode: errcode.ValidationFailed,
+		},
+		{
+			name: "squadId 与 agentIds 互斥",
+			mutate: func(r *CreateRequest) {
+				r.Mode = domain.ModeSquad
+				r.SquadID = "squad-1"
+			},
+			wantCode: errcode.ValidationFailed,
+		},
+		{
+			name: "ordinary 模式带 squadId",
+			mutate: func(r *CreateRequest) {
+				r.SquadID = "squad-1"
+			},
+			wantCode: errcode.ValidationFailed,
+		},
+		{
+			name: "合法 squad 请求",
+			mutate: func(r *CreateRequest) {
+				r.Mode = domain.ModeSquad
+				r.SquadID = "squad-1"
+				r.AgentIDs = nil
+				r.PlannerAgentID = ""
+			},
+			wantOK: true,
 		},
 		{
 			name:     "没有 Agent",

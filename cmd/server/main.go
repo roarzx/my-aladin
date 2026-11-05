@@ -123,9 +123,11 @@ func run(cfgPath string) error {
 		TTL:   cfg.Scheduler.AttemptLeaseTTL.Std(),
 		Log:   slog.Default(),
 	}
+	taskLock := orchestration.NewTaskLock(rdb,
+		cfg.Scheduler.TaskLockTTL.Std(), cfg.Scheduler.TaskLockRenew.Std())
 	runner := &orchestration.PlanRunner{
 		DB: db, Runtime: hub, Owner: "server",
-		Lock:  orchestration.NewTaskLock(rdb, cfg.Scheduler.TaskLockTTL.Std(), cfg.Scheduler.TaskLockRenew.Std()),
+		Lock:  taskLock,
 		Lease: lease,
 		Log:   slog.Default(),
 	}
@@ -137,6 +139,13 @@ func run(cfgPath string) error {
 
 	taskService := &task.Service{DB: db}
 	sessionService := &session.Service{DB: db, Dispatcher: hub}
+	squadRunner := &orchestration.SquadRunner{
+		DB: db, Sessions: sessionService, Lock: taskLock,
+		Owner: "server-squad", Log: slog.Default(),
+	}
+	compositeRunner := &orchestration.CompositeRunner{
+		DB: db, Plan: runner, Squad: squadRunner,
+	}
 	taskService.OnCreated = func(ctx context.Context, created *domain.Task) {
 		if err := sessionService.DispatchPlanning(ctx, created.ID, ""); err != nil {
 			slog.Warn("创建规划会话失败", "task", created.ID, "err", err)
@@ -215,9 +224,9 @@ func run(cfgPath string) error {
 
 	loopCtx, cancelLoop := context.WithCancel(context.Background())
 	defer cancelLoop()
-	go (&orchestration.Loop{DB: db, Runner: runner, Interval: time.Second, Log: slog.Default()}).Run(loopCtx)
+	go (&orchestration.Loop{DB: db, Runner: compositeRunner, Interval: time.Second, Log: slog.Default()}).Run(loopCtx)
 	go (&recovery.Watchdog{
-		DB: db, Runner: runner, Lease: lease, Canceller: canceller,
+		DB: db, Runner: compositeRunner, Lease: lease, Canceller: canceller,
 		CancelTimeout: cfg.Scheduler.CancelTimeout.Std(),
 		Interval:      cfg.Scheduler.RecoveryScanInterval.Std(),
 		Log:           slog.Default(),

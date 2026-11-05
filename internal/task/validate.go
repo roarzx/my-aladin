@@ -27,24 +27,34 @@ func normalizeAndValidate(req CreateRequest) (CreateRequest, error) {
 		return req, errcode.New(errcode.ValidationFailed, err.Error())
 	}
 	if req.Mode == domain.ModeSquad {
-		return req, errcode.New(errcode.ValidationFailed, "v1 仅支持 ordinary 模式")
-	}
-
-	if n := len(req.AgentIDs); n < 1 || n > MaxAgents {
-		return req, errcode.Newf(errcode.ValidationFailed, "agentIds 数量必须在 1–%d 之间", MaxAgents)
-	}
-	seen := make(map[string]bool, len(req.AgentIDs))
-	for _, id := range req.AgentIDs {
-		if strings.TrimSpace(id) == "" {
-			return req, errcode.New(errcode.ValidationFailed, "agentIds 不能包含空值")
+		if strings.TrimSpace(req.SquadID) == "" {
+			return req, errcode.New(errcode.ValidationFailed, "squad 模式必须提供 squadId")
 		}
-		if seen[id] {
-			return req, errcode.Newf(errcode.ValidationFailed, "agentIds 重复: %s", id)
+		// 选择小队与独立 Agent 互斥（dev_spec 3.3）
+		if len(req.AgentIDs) > 0 || strings.TrimSpace(req.PlannerAgentID) != "" {
+			return req, errcode.New(errcode.ValidationFailed,
+				"squadId 与 agentIds/plannerAgentId 互斥")
 		}
-		seen[id] = true
-	}
-	if req.PlannerAgentID == "" || !seen[req.PlannerAgentID] {
-		return req, errcode.New(errcode.PlannerNotInMembers, "plannerAgentId 必须属于 agentIds")
+	} else {
+		if strings.TrimSpace(req.SquadID) != "" {
+			return req, errcode.New(errcode.ValidationFailed, "squadId 只能用于 squad 模式")
+		}
+		if n := len(req.AgentIDs); n < 1 || n > MaxAgents {
+			return req, errcode.Newf(errcode.ValidationFailed, "agentIds 数量必须在 1–%d 之间", MaxAgents)
+		}
+		seen := make(map[string]bool, len(req.AgentIDs))
+		for _, id := range req.AgentIDs {
+			if strings.TrimSpace(id) == "" {
+				return req, errcode.New(errcode.ValidationFailed, "agentIds 不能包含空值")
+			}
+			if seen[id] {
+				return req, errcode.Newf(errcode.ValidationFailed, "agentIds 重复: %s", id)
+			}
+			seen[id] = true
+		}
+		if req.PlannerAgentID == "" || !seen[req.PlannerAgentID] {
+			return req, errcode.New(errcode.PlannerNotInMembers, "plannerAgentId 必须属于 agentIds")
+		}
 	}
 
 	if len(req.Repositories) > maxRepositoriesV1 {

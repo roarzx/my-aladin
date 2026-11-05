@@ -105,3 +105,32 @@ func GetPlannerAgentID(ctx context.Context, ex Executor, taskID string) (string,
 	}
 	return agentID, nil
 }
+
+// CreateSessionWithFingerprint 按指定序号创建会话并记录恢复指纹（F6）。
+func CreateSessionWithFingerprint(ctx context.Context, ex Executor, taskID, agentID, kind string,
+	ordinal int, fingerprint string) (SessionRecord, error) {
+	record := SessionRecord{
+		ID: idgen.New(), TaskID: taskID, AgentID: agentID, Kind: kind,
+		Ordinal: ordinal, DispatchState: "waiting_agent", ResumeFingerprint: fingerprint,
+	}
+	_, err := ex.ExecContext(ctx, `
+		INSERT INTO sessions (id, task_id, agent_id, kind, session_ordinal,
+			dispatch_state, resume_fingerprint)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		record.ID, taskID, agentID, kind, ordinal, record.DispatchState, fingerprint)
+	if err != nil {
+		return SessionRecord{}, fmt.Errorf("创建会话: %w", err)
+	}
+	return record, nil
+}
+
+// SetSessionACPID 记录 Provider 侧会话 ID 与指纹（复用判定依据）。
+func SetSessionACPID(ctx context.Context, ex Executor, sessionID, acpSessionID, fingerprint string) error {
+	_, err := ex.ExecContext(ctx, `
+		UPDATE sessions SET acp_session_id = ?, resume_fingerprint = ?, updated_at = UTC_TIMESTAMP(3)
+		WHERE id = ?`, nullString(acpSessionID), nullString(fingerprint), sessionID)
+	if err != nil {
+		return fmt.Errorf("更新会话 ACP ID: %w", err)
+	}
+	return nil
+}

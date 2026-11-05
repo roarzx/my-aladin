@@ -10,6 +10,7 @@ import (
 
 	"github.com/roarzx/my-aladin/internal/domain"
 	"github.com/roarzx/my-aladin/internal/idgen"
+	"github.com/roarzx/my-aladin/internal/squad"
 	mysqlstore "github.com/roarzx/my-aladin/internal/store/mysql"
 	"github.com/roarzx/my-aladin/pkg/errcode"
 )
@@ -21,6 +22,7 @@ type CreateRequest struct {
 	TemplateID     string          `json:"templateId"`
 	AgentIDs       []string        `json:"agentIds"`
 	PlannerAgentID string          `json:"plannerAgentId"`
+	SquadID        string          `json:"squadId"`
 	Repositories   []string        `json:"repositories"`
 }
 
@@ -41,6 +43,7 @@ type snapshot struct {
 	Template       *templateRef    `json:"template,omitempty"`
 	TemplateConfig json.RawMessage `json:"templateConfig,omitempty"`
 	Mode           string          `json:"mode"`
+	SquadID        string          `json:"squadId,omitempty"`
 	PlannerAgentID string          `json:"plannerAgentId"`
 	Agents         []agentRef      `json:"agents"`
 	Repositories   []string        `json:"repositories"`
@@ -63,25 +66,71 @@ func (s *Service) Create(ctx context.Context, creatorID uint64, workspaceID stri
 	defer func() { _ = tx.Rollback() }()
 
 	refs := make([]agentRef, 0, len(req.AgentIDs))
-	for i, agentID := range req.AgentIDs {
-		a, err := mysqlstore.GetAgent(ctx, tx, agentID)
+	var squadDef domain.Squad
+	if req.SquadID != "" {
+		def, err := mysqlstore.GetSquad(ctx, tx, req.SquadID)
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errcode.Newf(errcode.AgentUnavailable, "Agent 不存在: %s", agentID)
+			return nil, errcode.New(errcode.NotFound, "小队不存在")
 		}
 		if err != nil {
-			return nil, errcode.New(errcode.UpstreamUnavailable, "读取 Agent 失败")
+			return nil, errcode.New(errcode.UpstreamUnavailable, "读取小队失败")
 		}
-		if a.WorkspaceID != workspaceID {
-			return nil, errcode.Newf(errcode.AgentUnavailable, "Agent 不属于该工作区: %s", agentID)
+		if def.WorkspaceID != workspaceID {
+			return nil, errcode.New(errcode.NotFound, "小队不属于该工作区")
 		}
-		if err := a.SchedulableBy(creatorID); err != nil {
-			return nil, err
+		if !def.Enabled {
+			return nil, errcode.New(errcode.ValidationFailed, "小队已停用")
 		}
-		refs = append(refs, agentRef{
-			Ref:     fmt.Sprintf("a%d", i+1),
-			AgentID: a.ID,
-			Role:    string(a.TaskRole(req.PlannerAgentID)),
-		})
+		squadDef = def
+		agentIDs := append([]string{def.LeaderAgentID}, def.MemberIDs...)
+		seenAgent := make(map[string]bool, len(agentIDs))
+		for i, agentID := range agentIDs {
+			if seenAgent[agentID] {
+				continue
+			}
+			seenAgent[agentID] = true
+			a, err := mysqlstore.GetAgent(ctx, tx, agentID)
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, errcode.Newf(errcode.AgentUnavailable, "Agent 不存在: %s", agentID)
+			}
+			if err != nil {
+				return nil, errcode.New(errcode.UpstreamUnavailable, "读取 Agent 失败")
+			}
+			if a.WorkspaceID != workspaceID {
+				return nil, errcode.Newf(errcode.AgentUnavailable, "Agent 不属于该工作区: %s", agentID)
+			}
+			if err := a.SchedulableBy(creatorID); err != nil {
+				return nil, err
+			}
+			role := domain.TaskAgentMember
+			if i == 0 {
+				role = domain.TaskAgentPlanner
+			}
+			refs = append(refs, agentRef{
+				Ref: fmt.Sprintf("a%d", len(refs)+1), AgentID: a.ID, Role: string(role),
+			})
+		}
+	} else {
+		for i, agentID := range req.AgentIDs {
+			a, err := mysqlstore.GetAgent(ctx, tx, agentID)
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, errcode.Newf(errcode.AgentUnavailable, "Agent 不存在: %s", agentID)
+			}
+			if err != nil {
+				return nil, errcode.New(errcode.UpstreamUnavailable, "读取 Agent 失败")
+			}
+			if a.WorkspaceID != workspaceID {
+				return nil, errcode.Newf(errcode.AgentUnavailable, "Agent 不属于该工作区: %s", agentID)
+			}
+			if err := a.SchedulableBy(creatorID); err != nil {
+				return nil, err
+			}
+			refs = append(refs, agentRef{
+				Ref:     fmt.Sprintf("a%d", i+1),
+				AgentID: a.ID,
+				Role:    string(a.TaskRole(req.PlannerAgentID)),
+			})
+		}
 	}
 
 	if err := validateRepositories(ctx, tx, workspaceID, req.Repositories); err != nil {
@@ -97,6 +146,7 @@ func (s *Service) Create(ctx context.Context, creatorID uint64, workspaceID stri
 		Template:       tplRef,
 		TemplateConfig: tplConfig,
 		Mode:           string(req.Mode),
+		SquadID:        req.SquadID,
 		PlannerAgentID: req.PlannerAgentID,
 		Agents:         refs,
 		Repositories:   req.Repositories,
@@ -120,6 +170,11 @@ func (s *Service) Create(ctx context.Context, creatorID uint64, workspaceID stri
 	}
 	if err := mysqlstore.InsertTask(ctx, tx, task); err != nil {
 		return nil, errcode.New(errcode.UpstreamUnavailable, "写入任务失败")
+	}
+	if squadDef.ID != "" {
+		if _, err := squad.FreezeTx(ctx, tx, squadDef.ID, task.ID); err != nil {
+			return nil, err
+		}
 	}
 	for _, ref := range refs {
 		if err := mysqlstore.InsertTaskAgent(ctx, tx, task.ID, ref.Ref, ref.AgentID,
