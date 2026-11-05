@@ -8,6 +8,7 @@ import "context"
 // DispatchRequest 是一次派发请求；ExecutionID 由服务端在派发前固定。
 type DispatchRequest struct {
 	ExecutionID string
+	MachineID   string
 	TaskID      string
 	StepID      string
 	AttemptNo   uint32

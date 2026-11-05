@@ -127,6 +127,9 @@ func (s *Service) Propose(ctx context.Context, taskID string, req Proposal) (dom
 	if err := tx.Commit(); err != nil {
 		return domain.Plan{}, nil, errcode.New(errcode.UpstreamUnavailable, "提交事务失败")
 	}
+	_, _ = mysqlstore.AppendActivity(ctx, s.DB, taskID, "plan.submitted", map[string]any{
+		"plan_id": plan.ID, "revision": plan.Revision,
+	})
 	return plan, steps, nil
 }
 

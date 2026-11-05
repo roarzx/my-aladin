@@ -299,3 +299,63 @@ func GetAttemptByExecution(ctx context.Context, ex Executor, executionID string)
 func newID() string {
 	return idgen.New()
 }
+
+// ListTaskIDsByStatus 返回指定状态的任务 ID（供派发循环使用）。
+func ListTaskIDsByStatus(ctx context.Context, ex Executor, status domain.TaskStatus, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := ex.QueryContext(ctx,
+		`SELECT id FROM tasks WHERE status = ? ORDER BY updated_at LIMIT ?`, string(status), limit)
+	if err != nil {
+		return nil, fmt.Errorf("列出任务: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// GetStepByID 按 ID 读取步骤。
+func GetStepByID(ctx context.Context, ex Executor, id string) (domain.Step, error) {
+	var (
+		step   domain.Step
+		status string
+	)
+	err := ex.QueryRowContext(ctx, `
+		SELECT id, plan_id, ordinal, title, body, agent_ref, status, version
+		FROM plan_steps WHERE id = ?`, id).Scan(
+		&step.ID, &step.PlanID, &step.Ordinal, &step.Title, &step.Body,
+		&step.AgentRef, &status, &step.Version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Step{}, sql.ErrNoRows
+	}
+	if err != nil {
+		return domain.Step{}, fmt.Errorf("读取步骤: %w", err)
+	}
+	step.Status = domain.StepStatus(status)
+	return step, nil
+}
+
+// UpdateAttemptStatus 更新执行尝试的状态与证据。
+func UpdateAttemptStatus(ctx context.Context, ex Executor, id string, status domain.AttemptStatus,
+	errorClass domain.ErrorClass, resultDigest, commitSHA string) error {
+	if err := status.Valid(); err != nil {
+		return err
+	}
+	_, err := ex.ExecContext(ctx, `
+		UPDATE attempts SET status = ?, error_class = ?, result_digest = ?, commit_sha = ?
+		WHERE id = ?`,
+		string(status), nullString(string(errorClass)), nullString(resultDigest), nullString(commitSHA), id)
+	if err != nil {
+		return fmt.Errorf("更新执行尝试: %w", err)
+	}
+	return nil
+}

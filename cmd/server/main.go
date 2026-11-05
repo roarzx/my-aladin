@@ -19,6 +19,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/roarzx/my-aladin/internal/activity"
 	"github.com/roarzx/my-aladin/internal/auth"
 	"github.com/roarzx/my-aladin/internal/buildinfo"
 	"github.com/roarzx/my-aladin/internal/config"
@@ -26,6 +27,7 @@ import (
 	"github.com/roarzx/my-aladin/internal/health"
 	"github.com/roarzx/my-aladin/internal/httpapi"
 	"github.com/roarzx/my-aladin/internal/machine"
+	"github.com/roarzx/my-aladin/internal/orchestration"
 	"github.com/roarzx/my-aladin/internal/plan"
 	"github.com/roarzx/my-aladin/internal/session"
 	mysqlstore "github.com/roarzx/my-aladin/internal/store/mysql"
@@ -112,14 +114,29 @@ func run(cfgPath string) error {
 		slog.Warn("ALADDIN_ADMIN_TOKEN 未设置：业务接口将全部返回 401")
 	}
 
+	hub := ws.NewHub(slog.Default())
+	runner := &orchestration.PlanRunner{
+		DB: db, Runtime: hub, Owner: "server",
+		Lock: orchestration.NewTaskLock(rdb, cfg.Scheduler.TaskLockTTL.Std(), cfg.Scheduler.TaskLockRenew.Std()),
+		Log:  slog.Default(),
+	}
+	hub.OnEvent = (&orchestration.EventHandler{DB: db, Runner: runner, Log: slog.Default()}).Handle
+
 	taskService := &task.Service{DB: db}
-	sessionService := &session.Service{DB: db}
+	sessionService := &session.Service{DB: db, Dispatcher: hub}
 	taskService.OnCreated = func(ctx context.Context, created *domain.Task) {
 		if err := sessionService.DispatchPlanning(ctx, created.ID, ""); err != nil {
 			slog.Warn("创建规划会话失败", "task", created.ID, "err", err)
 		}
 	}
 	planService := &plan.Service{DB: db}
+	retryService := &orchestration.RetryService{
+		DB: db, Runtime: hub, MaxAttempts: cfg.Scheduler.MaxAttemptsPerStep,
+	}
+	retryHandler := &orchestration.Handler{
+		DB: db, Members: &mysqlstore.WorkspaceStore{DB: db}, Service: retryService,
+	}
+	activityHandler := &activity.Handler{DB: db, Members: &mysqlstore.WorkspaceStore{DB: db}}
 	planHandler := &plan.Handler{
 		DB:      db,
 		Members: &mysqlstore.WorkspaceStore{DB: db},
@@ -143,6 +160,7 @@ func run(cfgPath string) error {
 		HeartbeatTimeout:  cfg.Server.HeartbeatTimeout.Std(),
 		MaxMessageBytes:   cfg.ACP.MaxMessageBytes,
 	}, slog.Default())
+	wsServer.Handler = hub.Handler
 
 	router := httpapi.New(httpapi.Deps{
 		Authenticator: authenticator,
@@ -161,12 +179,18 @@ func run(cfgPath string) error {
 			r.Post("/issues/{id}/plans", planHandler.Submit)
 			r.Post("/plans/{id}/confirm", planHandler.Confirm)
 			r.Post("/issues/{id}/start", planHandler.Start)
+			r.Post("/steps/{id}/retry", retryHandler.Retry)
+			r.Get("/issues/{id}/events", activityHandler.List)
 		},
 		RegisterWorkspace: func(r chi.Router) {
 			r.With(auth.RequireAction(auth.ActionCreateIssue, nil)).
 				Post("/issues", (&task.Handler{Service: taskService}).Create)
 		},
 	})
+
+	loopCtx, cancelLoop := context.WithCancel(context.Background())
+	defer cancelLoop()
+	go (&orchestration.Loop{DB: db, Runner: runner, Interval: time.Second, Log: slog.Default()}).Run(loopCtx)
 
 	srv := &http.Server{
 		Addr:              cfg.Server.HTTPAddr,

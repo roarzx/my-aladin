@@ -71,8 +71,9 @@ type Server struct {
 	log      *slog.Logger
 	upgrader websocket.Upgrader
 
-	// Handler 在握手成功后运行；为 nil 时只维持连接与心跳。
-	Handler func(ctx context.Context, c *Conn) error
+	// Handler 在握手成功后运行；machineID 来自升级前的鉴权结果。
+	// 为 nil 时只维持连接与心跳。
+	Handler func(ctx context.Context, machineID string, c *Conn) error
 }
 
 // NewServer 构造 WS 服务端。
@@ -145,7 +146,7 @@ func (s *Server) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 	go s.heartbeatLoop(ctx, conn)
 
 	if s.Handler != nil {
-		if err := s.Handler(ctx, conn); err != nil {
+		if err := s.Handler(ctx, machineID, conn); err != nil {
 			s.log.Info("连接结束", "machine", machineID, "err", err)
 		}
 		return

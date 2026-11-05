@@ -105,6 +105,7 @@ func (r *PlanRunner) RunOnce(ctx context.Context, taskID string) error {
 	if r.Runtime != nil {
 		_, dispatchErr := r.Runtime.Dispatch(ctx, runtime.DispatchRequest{
 			ExecutionID: executionID,
+			MachineID:   a.MachineID,
 			TaskID:      taskID,
 			StepID:      next.ID,
 			AttemptNo:   attemptNo,
@@ -116,6 +117,10 @@ func (r *PlanRunner) RunOnce(ctx context.Context, taskID string) error {
 			return dispatchErr
 		}
 	}
+
+	_, _ = mysqlstore.AppendActivity(ctx, r.DB, taskID, "step.dispatched", map[string]any{
+		"step_id": next.ID, "attempt_no": attemptNo, "execution_id": executionID,
+	})
 
 	if r.Log != nil {
 		r.Log.Info("步骤已派发", "task", taskID, "step", next.ID, "attempt", attemptNo, "execution", executionID)

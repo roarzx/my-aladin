@@ -136,6 +136,9 @@ func (s *Service) Create(ctx context.Context, creatorID uint64, workspaceID stri
 	if err := tx.Commit(); err != nil {
 		return nil, errcode.New(errcode.UpstreamUnavailable, "提交事务失败")
 	}
+	_, _ = mysqlstore.AppendActivity(ctx, s.DB, task.ID, "task.created", map[string]any{
+		"name": task.Name, "mode": string(task.Mode),
+	})
 	if s.OnCreated != nil {
 		s.OnCreated(ctx, &task)
 	}
