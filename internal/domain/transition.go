@@ -60,6 +60,7 @@ var (
 	stepTransitions = map[StepStatus]map[Event]StepStatus{
 		StepPending: {
 			EvStepSelected: StepExecuting,
+			EvStepFailed:   StepFailed, // 派发前授权校验失败（9.5）
 		},
 		StepExecuting: {
 			EvStepDone:                StepCompleted,

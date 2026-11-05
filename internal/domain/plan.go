@@ -1,6 +1,9 @@
 package domain
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // PlanStatus 对应 plans.status（dev_spec 9.1）。
 type PlanStatus string
@@ -41,4 +44,14 @@ type Plan struct {
 	ContentMD   string
 	Status      PlanStatus
 	Version     uint64
+}
+
+// Confirmation 是对指定计划版本的确认；确认不可移用于新版本。
+type Confirmation struct {
+	ID          string
+	PlanID      string
+	Revision    int
+	ContentHash string
+	ActorID     uint64
+	CreatedAt   time.Time
 }

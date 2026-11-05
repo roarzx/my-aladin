@@ -25,6 +25,7 @@ import (
 	"github.com/roarzx/my-aladin/internal/health"
 	"github.com/roarzx/my-aladin/internal/httpapi"
 	"github.com/roarzx/my-aladin/internal/machine"
+	"github.com/roarzx/my-aladin/internal/plan"
 	mysqlstore "github.com/roarzx/my-aladin/internal/store/mysql"
 	"github.com/roarzx/my-aladin/internal/task"
 	"github.com/roarzx/my-aladin/internal/transport/ws"
@@ -110,6 +111,12 @@ func run(cfgPath string) error {
 	}
 
 	taskService := &task.Service{DB: db}
+	planService := &plan.Service{DB: db}
+	planHandler := &plan.Handler{
+		DB:      db,
+		Members: &mysqlstore.WorkspaceStore{DB: db},
+		Service: planService,
+	}
 
 	machineAuthenticator := func(req *http.Request) (string, error) {
 		header := req.Header.Get("Authorization")
@@ -141,6 +148,11 @@ func run(cfgPath string) error {
 				r.Use(httpapi.MachineAuth(machineAuthenticator))
 				httpapi.MountCLI(r, &contextStore{db: db})
 			})
+		},
+		RegisterGlobal: func(r chi.Router) {
+			r.Post("/issues/{id}/plans", planHandler.Submit)
+			r.Post("/plans/{id}/confirm", planHandler.Confirm)
+			r.Post("/issues/{id}/start", planHandler.Start)
 		},
 		RegisterWorkspace: func(r chi.Router) {
 			r.With(auth.RequireAction(auth.ActionCreateIssue, nil)).
