@@ -1,0 +1,7 @@
+{
+  "name": "smoke",
+  "tasks": [
+    { "id": "t1", "name": "修复登录", "input": { "repo": "demo", "issue": 1 } },
+    { "id": "t2", "name": "补充测试", "input": { "repo": "demo", "issue": 2 } }
+  ]
+}

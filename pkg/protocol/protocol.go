@@ -148,6 +148,10 @@ func Encode(e Envelope) ([]byte, error) {
 	if err := e.Validate(); err != nil {
 		return nil, err
 	}
+	if e.Type == TypeEvent {
+		// H3：事件随日志/审计落库前脱敏；stream_delta 保持原文（代码内容）
+		e.Payload = RedactJSON(e.Payload)
+	}
 	return json.Marshal(e)
 }
 
