@@ -19,23 +19,18 @@ export ALADDIN_ADMIN_TOKEN=devtoken
 ## 3. 启动执行面
 
 ```bash
-cat > /tmp/aladdin-daemon.yaml <<'YAML'
-daemon:
-  acp_url: "ws://127.0.0.1:8080/v1/acp"
-  api_url: "http://127.0.0.1:8080"
-  profile_dir: "/tmp/aladdin-profiles"
-agent:
-  claude:
-    bin: "/tmp/fakeagent"        # 演示用；真实环境指向 claude-agent-acp
-    expected_version: "0.100.0"
-    input_timeout_seconds: 120
-YAML
+# 安装 CLI（或在仓库内 make build 后使用 ./bin/aladdin）
+go install github.com/roarzx/my-aladin/cmd/aladdin@latest
 
-go build -o /tmp/fakeagent ./tests/fixtures/acp/fakeagent
-TOKEN=$(./bin/aladdin machine token --machine-id <machine-id> --dsn "$MYSQL_DSN" --ttl 8h | tail -1)
-ALADDIN_MACHINE_TOKEN="$TOKEN" ./bin/daemon --config /tmp/aladdin-daemon.yaml \
-  --profile dev --machine-id <machine-id>
+# 前端「机器管理」注册机器后，复制页面给出的命令：
+aladdin daemon start \
+  --machine-id <machine-id> \
+  --server-auth-token <token>
 ```
+
+默认连接 `ws://127.0.0.1:8080/v1/acp` 与 `http://127.0.0.1:8080`；
+远程控制面用 `--acp-url` / `--api-url` 覆盖。
+真实 Agent 需安装 `npm i -g @agentclientprotocol/claude-agent-acp` 并完成 claude 登录。
 
 ## 4. 创建任务
 

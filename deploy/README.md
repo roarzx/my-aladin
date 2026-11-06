@@ -26,10 +26,9 @@ export ALADDIN_ADMIN_TOKEN=devtoken
 ./bin/server &                # 默认 :8080，WS 在 /v1/acp
 curl -sf http://127.0.0.1:8080/readyz   # {"status":"ready"}
 
-# 4) 启动执行面（可选）
-TOKEN=$(./bin/aladdin machine token --machine-id <machine-id> --dsn "$MYSQL_DSN" --ttl 8h | tail -1)
-ALADDIN_MACHINE_TOKEN="$TOKEN" ./bin/daemon \
-  --config <daemon.yaml> --profile dev --machine-id <machine-id>
+# 4) 启动执行面（可选；推荐在前端「机器管理」注册后复制命令）
+go install github.com/roarzx/my-aladin/cmd/aladdin@latest
+aladdin daemon start --machine-id <machine-id> --server-auth-token <token>
 ```
 
 `daemon.yaml` 最小示例见 `docs/quickstart.md`（或 E2E 证据中的配置）。

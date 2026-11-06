@@ -22,17 +22,55 @@ import (
 type Options struct {
 	// Profile 对应 <profile_dir>/<profile>/，同一机器可并行多个实例。
 	Profile string
-	// ConfigPath 是配置文件路径。
+	// ConfigPath 是配置文件路径；为空时使用内置默认值。
 	ConfigPath string
+	// Config 可直接传入已构建的配置（优先于 ConfigPath）。
+	Config *config.Config
 	// MachineID 为空时按 profile 目录中的 machine_id 解析或生成。
 	MachineID string
+	// Token 是机器令牌；为空时读取 ALADDIN_MACHINE_TOKEN。
+	Token string
+	// ACPURL / APIURL / ProfileDir 覆盖配置文件中的对应值。
+	ACPURL     string
+	APIURL     string
+	ProfileDir string
+}
+
+// DefaultConfig 返回无需配置文件即可启动 daemon 的默认配置。
+func DefaultConfig() *config.Config {
+	cfg := config.Default()
+	cfg.Daemon.ACPURL = "ws://127.0.0.1:8080/v1/acp"
+	cfg.Daemon.APIURL = "http://127.0.0.1:8080"
+	claude := cfg.Agents["claude"]
+	claude.Bin = "claude-agent-acp"
+	claude.ExpectedVersion = "" // 不强制版本，按本机安装为准
+	claude.AutoApprove = true
+	cfg.Agents["claude"] = claude
+	return cfg
 }
 
 // Run 启动 daemon，直到 ctx 取消或服务端拒绝连接。
 func Run(ctx context.Context, opts Options) error {
-	cfg, err := config.LoadFor(opts.ConfigPath, config.RoleDaemon)
-	if err != nil {
-		return err
+	cfg := opts.Config
+	if cfg == nil {
+		if opts.ConfigPath != "" {
+			loaded, err := config.LoadFor(opts.ConfigPath, config.RoleDaemon)
+			if err != nil {
+				return err
+			}
+			cfg = loaded
+		} else {
+			cfg = DefaultConfig()
+		}
+	}
+	if opts.ACPURL != "" {
+		cfg.Daemon.ACPURL = opts.ACPURL
+	}
+	if opts.APIURL != "" {
+		cfg.Daemon.APIURL = opts.APIURL
+	}
+	if opts.ProfileDir != "" {
+		cfg.Daemon.ProfileDir = opts.ProfileDir
 	}
 
 	profile, err := ResolveProfile(cfg.Daemon.ProfileDir, opts.Profile, opts.MachineID)
@@ -40,9 +78,12 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	token := os.Getenv("ALADDIN_MACHINE_TOKEN")
+	token := opts.Token
 	if token == "" {
-		return errors.New("ALADDIN_MACHINE_TOKEN: 未设置（机器令牌见 9.5.1）")
+		token = os.Getenv("ALADDIN_MACHINE_TOKEN")
+	}
+	if token == "" {
+		return errors.New("缺少机器令牌：请使用 --server-auth-token 或 ALADDIN_MACHINE_TOKEN（见 9.5.1）")
 	}
 
 	idempotent, err := OpenIdempotentStore(filepath.Join(profile.Dir, "commands.jsonl"), 24*time.Hour)

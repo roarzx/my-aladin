@@ -28,8 +28,7 @@ const usage = `aladdin — 运维 CLI
   squad handoff      交接工作项负责人
   squad context      读取 Agent 上下文
   squad artifact     按字节区间读取方案内容
-  daemon status      查看本机 daemon 状态（C 阶段实现）
-  daemon logs        查看 daemon 日志（C 阶段实现）
+  daemon start       启动本机 daemon（--machine-id / --server-auth-token）
   reset              清空本地运行状态（C 阶段实现，危险）
 `
 
@@ -50,7 +49,7 @@ func main() {
 	case "squad":
 		err = runSquad(os.Args[2:])
 	case "daemon":
-		err = errors.New("daemon 子命令在 C 阶段实现")
+		err = runDaemon(os.Args[2:])
 	case "reset":
 		err = errors.New("reset 在 C 阶段实现")
 	case "-h", "--help", "help":

@@ -40,13 +40,27 @@
 - 仓库提交：`git log --oneline -1` → `7ef9b03 aladdin: Real Claude PR 演示`
 - PR 校验：`gh pr list --repo roarzx/aladdin-demo --head aladdin/2c3e723b`
 
+## CLI 注册方式复验
+
+按参考实现的注册 UX 调整为：
+
+```bash
+go install github.com/roarzx/my-aladin/cmd/aladdin@latest
+aladdin daemon start --machine-id <id> --server-auth-token <token>
+```
+
+2026-11-06 实测（任务 `9cdf0fc2-a334-4b23-a4dc-e728bb8af1a9`）：
+
+- daemon 使用内置默认配置上线（无需 config.yaml / 环境变量）
+- 真实 Claude 修改 README，commit `6ff1d45`
+- PR：https://github.com/roarzx/aladdin-demo/pull/2
+
 ## 复现命令
 
 ```bash
 make up && make build && make migrate
 # 前端注册机器后，用页面给出的 token 启动真实 daemon：
-ALADDIN_MACHINE_TOKEN=<token> ./bin/daemon \
-  --config config/config.yaml --profile default --machine-id <machine-id>
+aladdin daemon start --machine-id <machine-id> --server-auth-token <token>
 # 浏览器完成 Agent/任务/计划/启动
 ```
 
