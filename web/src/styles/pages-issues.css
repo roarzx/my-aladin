@@ -1,0 +1,450 @@
+/* Issue 核心流程页面（任务大盘 / Issue 列表 / 创建任务 / Issue 驾驶舱）专用样式
+   结构对照 hercules-frontend 线上 bundle；只新增 tokens/shell/components 之外的部分 */
+
+/* ---------- 任务大盘 ---------- */
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 360px;
+  gap: 12px;
+  margin-top: 12px;
+  align-items: start;
+}
+
+.dashboard-column { display: grid; gap: 12px; }
+
+/* 最近任务铺满整行，避免 6 列在窄列里换行 */
+.recent-panel { grid-column: 1 / -1; }
+
+.dashboard-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+/* 待我处理 */
+.attention-panel .work-list {
+  display: grid;
+  gap: 8px;
+}
+
+.work-item {
+  display: grid;
+  grid-template-columns: 96px 1fr 150px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.work-item:hover {
+  border-color: #bfdbfe;
+  box-shadow: var(--shadow-soft);
+  color: inherit;
+}
+
+.work-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.work-main strong {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-main span,
+.work-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.work-meta {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  white-space: nowrap;
+}
+
+/* 最近任务表（CSS Grid，对照参考站 .table/.table-row：每行独立卡片） */
+.recent-table {
+  display: grid;
+  gap: 8px;
+}
+
+.recent-table .table-row {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 0.7fr 0.8fr 0.8fr 0.8fr;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: inherit;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.recent-table .table-row.table-head-row {
+  background: #f8fafc;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.recent-table a.table-row:hover { background: var(--surface-hover); }
+
+.recent-table .cell-task {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.recent-table .cell-task strong {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-table .cell-task span { color: var(--faint); font-size: 12px; }
+
+.recent-table .cell-status { display: inline-flex; align-items: center; }
+
+/* ---------- Issue 列表 ---------- */
+
+.issue-list-table .data-table-row {
+  grid-template-columns: 1.6fr 110px 1fr 120px 170px;
+}
+
+/* 整行是链接，去掉浏览器默认下划线 */
+.issue-list-table a.data-table-row {
+  color: inherit;
+  text-decoration: none;
+}
+
+.issue-list-table .cell-task {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.issue-list-table .cell-task strong {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issue-list-table .cell-task span { color: var(--faint); font-size: 12px; }
+
+.issue-list-table .cell-status { display: inline-flex; align-items: center; }
+
+/* ---------- 创建任务 ---------- */
+
+.create-steps {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.create-step {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.create-step .step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--bg-soft);
+  border: 1px solid var(--line-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.create-step.active {
+  border-color: #bfdbfe;
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-weight: 650;
+}
+
+.create-step.active .step-index {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+}
+
+.empty-hint {
+  padding: 14px;
+  color: var(--muted);
+  font-size: 13px;
+  background: var(--bg-soft);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+
+.create-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.create-section-title .required { color: var(--red); font-weight: 600; }
+
+.create-note {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.alert-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.alert-banner.warn {
+  background: var(--yellow-soft);
+  border: 1px solid #fed7aa;
+  color: #92400e;
+}
+
+.machine-select-card {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.machine-select-card:hover { border-color: #93c5fd; }
+
+.machine-select-card.selected {
+  border-color: var(--blue);
+  background: var(--blue-soft);
+  box-shadow: 0 0 0 1px var(--blue) inset;
+}
+
+.machine-select-card strong { font-size: 13px; }
+.machine-select-card span { color: var(--muted); font-size: 12px; }
+
+/* ---------- Issue 驾驶舱 ---------- */
+
+.cockpit-page { margin: -5px; }
+
+.cockpit-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.cockpit-header-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cockpit-header-title-row h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 30px;
+}
+
+.cockpit-header-meta {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cockpit-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: var(--red-soft);
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-sm);
+  color: #991b1b;
+  font-size: 13px;
+}
+
+.cockpit-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+  align-items: start;
+}
+
+.cockpit-column {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.recovery-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+  font-size: 13px;
+  display: grid;
+  gap: 4px;
+}
+
+.steps-panel,
+.execution-panel {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px;
+}
+
+.steps-panel .panel-head,
+.execution-panel .panel-head { margin-bottom: 10px; }
+
+.step-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.step-card {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.step-card.done { border-color: #bbf7d0; background: var(--green-soft); }
+.step-card.active { border-color: #bfdbfe; background: var(--blue-soft); }
+.step-card.failed { border-color: #fecaca; background: var(--red-soft); }
+
+.step-card .step-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.step-card .step-title {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step-card .step-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.timeline-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  overflow-y: auto;
+}
+
+.timeline-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.timeline-item .seq {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  min-width: 44px;
+}
+
+.timeline-item .kind { color: var(--text); font-weight: 600; }
+
+.stream-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---------- 响应式 ---------- */
+
+@media (max-width: 1080px) {
+  .dashboard-grid { grid-template-columns: 1fr; }
+  .cockpit-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 720px) {
+  .work-item { grid-template-columns: 80px 1fr; }
+  .work-item .work-meta { display: none; }
+  .recent-table .table-row { grid-template-columns: 1.5fr 1fr 0.8fr; }
+  .recent-table .table-row > :nth-child(n + 4) { display: none; }
+  .issue-list-table .data-table-row { grid-template-columns: 1.6fr 100px 150px; }
+  .issue-list-table .data-table-row > :nth-child(3),
+  .issue-list-table .data-table-row > :nth-child(4) { display: none; }
+}

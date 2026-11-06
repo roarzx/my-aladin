@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { EventPage, IssueDetail, PlanDetail, PlanStep } from '../api/issues'
+import { RouterProvider } from '../router'
 import IssueCockpit, { canRetry, type CockpitApi } from './IssueCockpit'
 
 function makeDetail(status: IssueDetail['task']['status'] = 'executing'): IssueDetail {
@@ -61,6 +62,15 @@ function streamOf(pages: EventPage[]) {
   })
 }
 
+/** AppShell 依赖路由上下文，测试统一包一层 RouterProvider。 */
+function renderCockpit(props: Parameters<typeof IssueCockpit>[0]) {
+  return render(
+    <RouterProvider>
+      <IssueCockpit {...props} />
+    </RouterProvider>,
+  )
+}
+
 describe('canRetry', () => {
   it('只有 failed 步骤显示重试入口', () => {
     expect(canRetry(steps[1])).toBe(true)
@@ -72,12 +82,12 @@ describe('canRetry', () => {
 describe('IssueCockpit', () => {
   it('渲染任务状态、计划步骤与失败恢复入口', async () => {
     const api = makeApi()
-    render(<IssueCockpit taskId="task-1" api={api} />)
+    renderCockpit({ taskId: 'task-1', api })
 
     expect(await screen.findByText('修复登录')).toBeInTheDocument()
     expect(screen.getByTestId('task-status')).toHaveTextContent('执行中')
-    expect(screen.getByTestId('step-status-1')).toHaveTextContent('completed')
-    expect(screen.getByTestId('step-status-2')).toHaveTextContent('failed')
+    expect(screen.getByTestId('step-status-1')).toHaveTextContent('已完成')
+    expect(screen.getByTestId('step-status-2')).toHaveTextContent('失败')
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
     expect(screen.getByText(/失败步骤 2/)).toBeInTheDocument()
     expect(api.fetchPlan).toHaveBeenCalledWith('task-1', 2)
@@ -101,7 +111,11 @@ describe('IssueCockpit', () => {
     }
 
     const api = makeApi()
-    render(<IssueCockpit taskId="task-1" api={api} eventsFetcher={streamOf([page1, page2])} />)
+    renderCockpit({
+      taskId: 'task-1',
+      api,
+      eventsFetcher: streamOf([page1, page2]),
+    })
 
     await screen.findByTestId('event-1')
     await screen.findByTestId('event-4')
@@ -112,7 +126,7 @@ describe('IssueCockpit', () => {
   it('点击重试调用接口并刷新状态', async () => {
     const api = makeApi()
     const user = userEvent.setup()
-    render(<IssueCockpit taskId="task-1" api={api} />)
+    renderCockpit({ taskId: 'task-1', api })
 
     const button = await screen.findByRole('button', { name: '重试' })
     await user.click(button)

@@ -1,7 +1,8 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { RouterProvider } from '../router'
 import IssueList from './IssueList'
 import TokenGate from './TokenGate'
 
@@ -37,22 +38,34 @@ afterEach(() => {
 describe('IssueList', () => {
   it('渲染任务列表并链接到驾驶舱', async () => {
     stubFetch({ data: tasks })
-    render(<IssueList />)
+    render(
+      <RouterProvider>
+        <IssueList />
+      </RouterProvider>,
+    )
 
-    const link = await screen.findByRole('link', { name: '演示任务' })
-    expect(link).toHaveAttribute('href', '/?taskId=task-1')
-    expect(screen.getByText('对话中')).toBeInTheDocument()
+    const link = await screen.findByRole('link', { name: /演示任务/ })
+    expect(link).toHaveAttribute('href', '/task/detail?id=task-1')
+    expect(within(link).getByText('对话中')).toBeInTheDocument()
   })
 
   it('空列表给出创建提示', async () => {
     stubFetch({ data: [] })
-    render(<IssueList />)
+    render(
+      <RouterProvider>
+        <IssueList />
+      </RouterProvider>,
+    )
     expect(await screen.findByText(/还没有任务/)).toBeInTheDocument()
   })
 
   it('接口失败显示错误信息', async () => {
     stubFetch({ error: { code: 'UNAUTHENTICATED', message: '缺少 Bearer 令牌' } }, 401)
-    render(<IssueList />)
+    render(
+      <RouterProvider>
+        <IssueList />
+      </RouterProvider>,
+    )
     expect(await screen.findByRole('alert')).toHaveTextContent('缺少 Bearer 令牌')
   })
 })

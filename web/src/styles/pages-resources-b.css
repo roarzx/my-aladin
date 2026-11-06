@@ -1,0 +1,351 @@
+/* ------------------------------------------------------------------
+   资源管理 B 组页面样式：项目管理 / 流程管理 / 流程执行 / Webhook
+   对照 hercules-frontend 的 resources 表格与弹窗样式。
+   使用独立 .rb- 前缀，避免与 pages-resources.css 的级联互相影响。
+   ------------------------------------------------------------------ */
+
+/* ---------- 工具栏 ---------- */
+
+.rb-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.rb-toolbar-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rb-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  min-width: 240px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--faint);
+}
+
+.rb-search:focus-within { border-color: #9fc3fb; }
+
+.rb-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.rb-select {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
+/* ---------- 状态筛选胶囊 ---------- */
+
+.rb-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.rb-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.rb-chip:hover { background: var(--surface-hover); color: var(--text); }
+
+.rb-chip.active {
+  background: var(--blue-soft);
+  border-color: #bfdbfe;
+  color: var(--blue);
+  font-weight: 650;
+}
+
+/* ---------- 数据表格 ---------- */
+
+.rb-table {
+  --rb-cols: repeat(4, minmax(0, 1fr));
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.rb-table.cols-5 { --rb-cols: 1.6fr 0.8fr 0.8fr 1.2fr 1fr; }
+.rb-table.cols-6 { --rb-cols: 1.4fr 1.6fr 1.2fr 0.7fr 1fr 0.9fr; }
+.rb-table.cols-6.flows { --rb-cols: 1.6fr 0.6fr 0.7fr 0.8fr 1.1fr 1.2fr; }
+.rb-table.cols-8 { --rb-cols: 1.35fr 1fr 1.1fr 0.6fr 0.9fr 1fr 0.8fr 1.1fr; }
+
+.rb-table-head,
+.rb-row {
+  display: grid;
+  grid-template-columns: var(--rb-cols);
+  align-items: center;
+  gap: 12px;
+  min-width: 900px;
+  padding: 11px 14px;
+  font-size: 13px;
+}
+
+.rb-table-head {
+  background: #fafbfd;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.rb-row { border-bottom: 1px solid var(--line); }
+.rb-row:last-child { border-bottom: 0; }
+.rb-row:hover { background: var(--surface-hover); }
+
+.rb-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rb-cell-name strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-weight: 650;
+}
+
+.rb-muted { color: var(--muted); }
+
+.rb-url {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--blue);
+}
+
+.rb-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.rb-action {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--blue);
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.rb-action:hover { text-decoration: underline; }
+.rb-action.danger { color: var(--red); }
+
+.rb-divider { color: #d6dfec; font-size: 12px; }
+
+.rb-empty { padding: 26px 16px; }
+
+.rb-events { display: flex; flex-wrap: wrap; gap: 4px; }
+
+.rb-event {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* ---------- 分页 ---------- */
+
+.rb-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rb-pagination-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rb-page-button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.rb-page-button:disabled { color: var(--faint); cursor: not-allowed; }
+
+.rb-page-size {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+
+/* ---------- 筛选提示 ---------- */
+
+.rb-filter-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: var(--blue-soft);
+  border: 1px solid #c8dcff;
+  border-radius: var(--radius-sm);
+  color: #1e40af;
+  font-size: 12px;
+}
+
+.rb-link-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--blue);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.rb-link-button:hover { text-decoration: underline; }
+
+/* ---------- 弹窗表单 ---------- */
+
+.rb-form {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.rb-form .wide { grid-column: 1 / -1; }
+
+.rb-form-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.rb-required { color: var(--red); }
+
+.rb-checks {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.rb-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.rb-check input { accent-color: var(--blue); }
+
+/* ---------- 开关 ---------- */
+
+.rb-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.rb-switch input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+}
+
+.rb-switch-track {
+  position: relative;
+  width: 38px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--line-strong);
+  transition: background 0.16s ease;
+}
+
+.rb-switch-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
+  transition: transform 0.16s ease;
+}
+
+.rb-switch input:checked + .rb-switch-track { background: var(--blue); }
+.rb-switch input:checked + .rb-switch-track::after { transform: translateX(18px); }
+.rb-switch input:focus-visible + .rb-switch-track { box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18); }
+
+@media (max-width: 720px) {
+  .rb-form { grid-template-columns: minmax(0, 1fr); }
+  .rb-search { flex: 1 1 100%; }
+}
