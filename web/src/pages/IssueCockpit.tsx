@@ -64,7 +64,7 @@ const STATUS_TONES: Record<TaskStatus, TagTone> = {
   pending: 'pending',
   plan_confirming: 'review',
   executing: 'running',
-  paused: 'input',
+  paused: 'paused',
   cancelling: 'queued',
   chatting: 'review',
   cancelled: 'cancelled',

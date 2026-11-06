@@ -49,14 +49,18 @@ describe('IssueList', () => {
     expect(within(link).getByText('对话中')).toBeInTheDocument()
   })
 
-  it('空列表给出创建提示', async () => {
+  it('看板四列在空列表时展示占位', async () => {
     stubFetch({ data: [] })
     render(
       <RouterProvider>
         <IssueList />
       </RouterProvider>,
     )
-    expect(await screen.findByText(/还没有任务/)).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '待处理' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '执行中' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '异常处理' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '已完成' })).toBeInTheDocument()
+    expect(screen.getAllByText('暂无任务')).toHaveLength(4)
   })
 
   it('接口失败显示错误信息', async () => {

@@ -10,7 +10,7 @@ export type TagTone =
   | 'pending'
   | 'cancelled'
   | 'review'
-  | 'input'
+  | 'paused'
   | 'draft'
   | 'saved'
   | 'muted'

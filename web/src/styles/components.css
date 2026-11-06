@@ -79,7 +79,7 @@
 .state-tag.pending { background: #fff8e6; border-color: #f4d38d; color: #8a5a00; }
 .state-tag.review { background: var(--yellow-soft); border-color: #fed7aa; color: #a95500; }
 .state-tag.draft { background: var(--yellow-soft); border-color: #fdba74; color: #c2410c; }
-.state-tag.input { background: var(--cyan-soft); border-color: #bae6fd; color: var(--cyan); }
+.state-tag.paused { background: var(--cyan-soft); border-color: #bae6fd; color: var(--cyan); }
 .state-tag.cancelled { background: #f1f5f9; border-color: #cbd5e1; color: #64748b; }
 .state-tag.muted { background: #f3f4f6; border-color: #e5e7eb; color: var(--muted); }
 
@@ -98,6 +98,7 @@
 .state-dot.queued,
 .state-dot.pending { background: #d97706; }
 .state-dot.cancelled { background: #94a3b8; }
+.state-dot.paused { background: var(--cyan); }
 
 /* ---------- 面板 / 卡片 ---------- */
 

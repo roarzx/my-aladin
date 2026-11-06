@@ -10,7 +10,7 @@ const STATUS_META: Record<TaskStatus, { label: string; tone: TagTone }> = {
   pending: { label: '待规划', tone: 'pending' },
   plan_confirming: { label: '待确认计划', tone: 'review' },
   executing: { label: '执行中', tone: 'running' },
-  paused: { label: '已暂停', tone: 'input' },
+  paused: { label: '已暂停', tone: 'paused' },
   cancelling: { label: '取消中', tone: 'queued' },
   chatting: { label: '对话中', tone: 'review' },
   cancelled: { label: '已取消', tone: 'cancelled' },
