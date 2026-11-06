@@ -3,11 +3,13 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -159,6 +161,12 @@ func TestStepHandlerRunsACPAndReportsDone(t *testing.T) {
 	if last.data["branch"] != "aladdin/x" {
 		t.Fatalf("branch = %v", last.data["branch"])
 	}
+	if last.data["commit_sha"] != "" || last.data["pr_url"] != "" {
+		t.Fatalf("无仓库时不应有 commit/pr: %+v", last.data)
+	}
+	if digest, ok := last.data["summary_digest"].(string); !ok || len(digest) != 64 {
+		t.Fatalf("summary_digest = %v", last.data["summary_digest"])
+	}
 
 	sender.mu.Lock()
 	streams := append([]recordedStream(nil), sender.streams...)
@@ -215,5 +223,186 @@ func TestStepHandlerRequiresSender(t *testing.T) {
 	}
 	if out.Accepted || out.Error == nil || out.Error.Code != "no_channel" {
 		t.Fatalf("响应 = %+v", out)
+	}
+}
+
+// fakePRCreator 记录调用参数，测试中不访问 GitHub。
+type fakePRCreator struct {
+	mu    sync.Mutex
+	url   string
+	err   error
+	calls int
+	dir   string
+	last  PRRequest
+}
+
+func (f *fakePRCreator) EnsurePR(_ context.Context, dir string, req PRRequest) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	f.dir = dir
+	f.last = req
+	return f.url, f.err
+}
+
+func (f *fakePRCreator) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+// repoParams 构造一个带本地裸仓库的任务步骤。
+func repoParams(origin, workRoot, taskID, branch string) stepParams {
+	return stepParams{
+		ExecutionID: "exec-repo", TaskID: taskID, StepID: "step-repo", AttemptNo: 1,
+		Branch: branch, Prompt: "实现功能", WorkDir: workRoot,
+		RepoURL: origin, RepoDefaultBranch: "main",
+		SystemPrompt: "你是 Aladdin 编码 Agent。", TaskTitle: "实现登录", StepTitle: "写代码",
+	}
+}
+
+func TestStepHandlerPreparesRepoAndReportsCommitAndPR(t *testing.T) {
+	origin := setupOrigin(t)
+	baseSHA := gitCmd(t, origin, "rev-parse", "refs/heads/main")
+	workRoot := t.TempDir()
+	taskID := "task-abcdefgh"
+	branch := "aladdin/" + shortID(taskID)
+
+	h := newTestStepHandler(t, "write_file")
+	pr := &fakePRCreator{url: "https://github.com/acme/repo/pull/7"}
+	h.PRCreator = pr
+
+	sender := newRecordingSender()
+	params := repoParams(origin, workRoot, taskID, branch)
+	if _, err := h.Handle(WithSender(context.Background(), sender), startEnvelope(t, params)); err != nil {
+		t.Fatal(err)
+	}
+	sender.wait(t)
+
+	last := sender.lastEvent()
+	if last.kind != "step_done" {
+		t.Fatalf("终态事件 = %+v", last)
+	}
+	if last.data["branch"] != branch {
+		t.Fatalf("branch = %v", last.data["branch"])
+	}
+	// fake agent 写入 agent-output.txt：应产生新提交并推送。
+	commitSHA, _ := last.data["commit_sha"].(string)
+	if commitSHA == "" || commitSHA == baseSHA {
+		t.Fatalf("commit_sha = %v, 基线 %s", last.data["commit_sha"], baseSHA)
+	}
+	if digest, ok := last.data["summary_digest"].(string); !ok || len(digest) != 64 {
+		t.Fatalf("summary_digest = %v", last.data["summary_digest"])
+	}
+	if last.data["pr_url"] != pr.url {
+		t.Fatalf("pr_url = %v", last.data["pr_url"])
+	}
+
+	wantDir := filepath.Join(workRoot, "aladdin", shortID(taskID))
+	pr.mu.Lock()
+	gotDir, gotReq, calls := pr.dir, pr.last, pr.calls
+	pr.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("PR 调用次数 = %d", calls)
+	}
+	if gotDir != wantDir {
+		t.Fatalf("PR 工作目录 = %q, 期望 %q", gotDir, wantDir)
+	}
+	if gotReq.Base != "main" || gotReq.Head != branch || gotReq.RepoURL != origin || gotReq.Title != "实现登录" {
+		t.Fatalf("PR 请求 = %+v", gotReq)
+	}
+	// 计划分支已推送到本地裸仓库。
+	gitCmd(t, origin, "rev-parse", "--verify", "refs/heads/"+branch)
+}
+
+func TestStepHandlerFailsOnDirtyWorkspace(t *testing.T) {
+	origin := setupOrigin(t)
+	workRoot := t.TempDir()
+	taskID := "task-dirtyxx"
+	branch := "aladdin/" + shortID(taskID)
+	dir := filepath.Join(workRoot, "aladdin", shortID(taskID))
+
+	if _, err := Prepare(context.Background(), RepoSpec{URL: origin, Dir: dir, PlanBranch: branch}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "user.txt"), []byte("user change\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h := newTestStepHandler(t, "")
+	pr := &fakePRCreator{url: "https://example.com/pr/1"}
+	h.PRCreator = pr
+	sender := newRecordingSender()
+	if _, err := h.Handle(WithSender(context.Background(), sender),
+		startEnvelope(t, repoParams(origin, workRoot, taskID, branch))); err != nil {
+		t.Fatal(err)
+	}
+	sender.wait(t)
+
+	last := sender.lastEvent()
+	if last.kind != "step_fail" || last.data["error_class"] != "tool" {
+		t.Fatalf("终态事件 = %+v", last)
+	}
+	if pr.callCount() != 0 {
+		t.Fatal("脏工作区不应创建 PR")
+	}
+}
+
+func TestStepHandlerReportsToolFailWhenPRFails(t *testing.T) {
+	origin := setupOrigin(t)
+	workRoot := t.TempDir()
+	taskID := "task-prfail"
+	branch := "aladdin/" + shortID(taskID)
+
+	h := newTestStepHandler(t, "write_file")
+	h.PRCreator = &fakePRCreator{err: errors.New("gh pr create: boom")}
+	sender := newRecordingSender()
+	if _, err := h.Handle(WithSender(context.Background(), sender),
+		startEnvelope(t, repoParams(origin, workRoot, taskID, branch))); err != nil {
+		t.Fatal(err)
+	}
+	sender.wait(t)
+
+	last := sender.lastEvent()
+	if last.kind != "step_fail" || last.data["error_class"] != "tool" {
+		t.Fatalf("终态事件 = %+v", last)
+	}
+	if reason, _ := last.data["reason"].(string); !strings.Contains(reason, "boom") {
+		t.Fatalf("reason = %v", last.data["reason"])
+	}
+}
+
+func TestStepHandlerNoChangesSkipsPR(t *testing.T) {
+	origin := setupOrigin(t)
+	workRoot := t.TempDir()
+	taskID := "task-nochange"
+	branch := "aladdin/" + shortID(taskID)
+
+	h := newTestStepHandler(t, "")
+	pr := &fakePRCreator{url: "https://example.com/pr/1"}
+	h.PRCreator = pr
+	sender := newRecordingSender()
+	if _, err := h.Handle(WithSender(context.Background(), sender),
+		startEnvelope(t, repoParams(origin, workRoot, taskID, branch))); err != nil {
+		t.Fatal(err)
+	}
+	sender.wait(t)
+
+	last := sender.lastEvent()
+	if last.kind != "step_done" || last.data["pr_url"] != "" {
+		t.Fatalf("终态事件 = %+v", last)
+	}
+	if pr.callCount() != 0 {
+		t.Fatal("无改动步骤不应创建 PR")
+	}
+}
+
+func TestPromptWithSystemPrefix(t *testing.T) {
+	if got := promptWithSystem(stepParams{Prompt: "do"}); got != "do" {
+		t.Fatalf("无 system_prompt 时应保持原样: %q", got)
+	}
+	got := promptWithSystem(stepParams{SystemPrompt: "sys", Prompt: "do"})
+	if got != "sys\n\ndo" {
+		t.Fatalf("prompt = %q", got)
 	}
 }

@@ -16,6 +16,8 @@ Web / CLI / API
    Daemon（Go）── ACP Agent（Claude Code 等）
 ```
 
+- **主路径已打通**：注册机器 → 配置 Agent → 创建 Issue → 确认/启动 → 真实 Claude Code
+  修改仓库 → 自动 commit/push → 生成 GitHub PR（详见 `docs/evidence/MAIN-PATH/`）
 - 计划执行：`pending → plan_confirming → executing → chatting/paused/cancelled/failed`
 - `completed` 表示“执行完成”，不等于“验收成功”
 - 派发幂等：`execution_id` + daemon 命令去重；尝试围栏用 `attempt_no`
@@ -58,8 +60,11 @@ CI：lint / unit / integration / web 四个 job，见 `.github/workflows/ci.yml`
 
 ## 已知限制
 
-- daemon 尚未处理 `start_planning_session` / `start_squad_session`：规划与小队的
-  执行派发仍由 HTTP/CLI 驱动。
+- 主路径中的计划由驾驶舱人工提交/确认（符合“确认才启动”的规格）；规划 Agent 自动产出计划
+  尚未接入（daemon 未处理 `start_planning_session`）。
+- 小队执行派发（`start_squad_session`）未接入；小队工作项目前由服务端状态机与 CLI 驱动。
+- F7/G8/H7 三个前端工作包仍是页面外壳（小队、FlowRun 中心、评估面板），
+  小队/Flow 控制面 API 也已具备但页面未接线。
 - 对账的 Git 证据（`get_git_diff` / `list_git_commits`）未接入，自动判定
   completed/failed 需人工裁决或注入证据源。
 - Flow 的 environment_prepare / mars_acceptance 为 Server 侧占位执行器。
@@ -72,6 +77,7 @@ CI：lint / unit / integration / web 四个 job，见 `.github/workflows/ci.yml`
 - [快速启动](docs/quickstart.md)
 - [部署与迁移](deploy/README.md)
 - [性能基线](docs/perf-baseline.md)
+- [主路径验收证据](docs/evidence/MAIN-PATH/README.md)
 - [验收证据索引](docs/evidence/README.md)
 - 架构决策：[ADR-0001 技术栈](docs/adr/0001-tech-stack.md)、
   [ADR-0002 存储分工](docs/adr/0002-storage-split.md)、

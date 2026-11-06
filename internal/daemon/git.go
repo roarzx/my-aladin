@@ -6,7 +6,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+)
+
+// 自动提交使用的本地 Git 身份；仅在仓库未配置时写入。
+const (
+	botName  = "Aladdin Bot"
+	botEmail = "aladdin@example.com"
 )
 
 var (
@@ -43,6 +50,10 @@ func Prepare(ctx context.Context, spec RepoSpec) (*Workspace, error) {
 		if spec.URL == "" {
 			return nil, errors.New("workspace: 目录不存在且未提供 URL")
 		}
+		// git clone 不会创建多层父目录（如 <work_dir>/aladdin）。
+		if err := os.MkdirAll(filepath.Dir(spec.Dir), 0o755); err != nil {
+			return nil, fmt.Errorf("创建父目录: %w", err)
+		}
 		if out, err := runGit(ctx, "", "clone", spec.URL, spec.Dir); err != nil {
 			return nil, fmt.Errorf("git clone: %w: %s", err, strings.TrimSpace(out))
 		}
@@ -50,14 +61,27 @@ func Prepare(ctx context.Context, spec RepoSpec) (*Workspace, error) {
 		return nil, err
 	}
 
+	if _, err := os.Stat(filepath.Join(spec.Dir, ".git")); err != nil {
+		return nil, fmt.Errorf("workspace: %s 已存在但不是 git 仓库: %w", spec.Dir, err)
+	}
+
 	w := &Workspace{Dir: spec.Dir, PlanBranch: spec.PlanBranch}
 	if spec.PlanBranch != "" {
-		if _, err := runGit(ctx, w.Dir, "rev-parse", "--verify", "refs/heads/"+spec.PlanBranch); err != nil {
+		switch {
+		case refExists(ctx, w.Dir, "refs/heads/"+spec.PlanBranch):
+			if out, err := runGit(ctx, w.Dir, "checkout", spec.PlanBranch); err != nil {
+				return nil, fmt.Errorf("切换分支: %w: %s", err, strings.TrimSpace(out))
+			}
+		case refExists(ctx, w.Dir, "refs/remotes/origin/"+spec.PlanBranch):
+			// 远端已有计划分支（换机/重试）：基于远端恢复，避免 non-fast-forward
+			if out, err := runGit(ctx, w.Dir, "checkout", "-B", spec.PlanBranch,
+				"origin/"+spec.PlanBranch); err != nil {
+				return nil, fmt.Errorf("恢复远端分支: %w: %s", err, strings.TrimSpace(out))
+			}
+		default:
 			if out, err := runGit(ctx, w.Dir, "checkout", "-b", spec.PlanBranch); err != nil {
 				return nil, fmt.Errorf("创建分支: %w: %s", err, strings.TrimSpace(out))
 			}
-		} else if out, err := runGit(ctx, w.Dir, "checkout", spec.PlanBranch); err != nil {
-			return nil, fmt.Errorf("切换分支: %w: %s", err, strings.TrimSpace(out))
 		}
 	}
 
@@ -92,6 +116,49 @@ func (w *Workspace) EnsureClean(ctx context.Context) error {
 	}
 	if strings.TrimSpace(out) != "" {
 		return fmt.Errorf("%w: %s", ErrDirtyWorkspace, firstLine(out))
+	}
+	return nil
+}
+
+// HasChanges 报告工作区是否有未提交改动（含未跟踪文件）。
+func (w *Workspace) HasChanges(ctx context.Context) (bool, error) {
+	out, err := w.Status(ctx)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
+// CommitAll 暂存全部改动并提交，返回新的 HEAD。
+//
+// 提交前若仓库未配置 user.name/user.email，则只在本仓库设置 Aladdin Bot 身份。
+func (w *Workspace) CommitAll(ctx context.Context, message string) (string, error) {
+	if err := w.ensureIdentity(ctx); err != nil {
+		return "", err
+	}
+	if out, err := runGit(ctx, w.Dir, "add", "-A"); err != nil {
+		return "", fmt.Errorf("git add: %w: %s", err, strings.TrimSpace(out))
+	}
+	if out, err := runGit(ctx, w.Dir, "commit", "-m", message); err != nil {
+		return "", fmt.Errorf("git commit: %w: %s", err, strings.TrimSpace(out))
+	}
+	return w.Head(ctx)
+}
+
+func (w *Workspace) ensureIdentity(ctx context.Context) error {
+	if err := ensureGitConfig(ctx, w.Dir, "user.name", botName); err != nil {
+		return err
+	}
+	return ensureGitConfig(ctx, w.Dir, "user.email", botEmail)
+}
+
+// ensureGitConfig 仅在键无值时写入（--get 未命中时 git 以 1 退出）。
+func ensureGitConfig(ctx context.Context, dir, key, value string) error {
+	if out, err := runGit(ctx, dir, "config", "--get", key); err == nil && strings.TrimSpace(out) != "" {
+		return nil
+	}
+	if out, err := runGit(ctx, dir, "config", key, value); err != nil {
+		return fmt.Errorf("git config %s: %w: %s", key, err, strings.TrimSpace(out))
 	}
 	return nil
 }
@@ -134,6 +201,11 @@ func (w *Workspace) Push(ctx context.Context, branch string) error {
 		return fmt.Errorf("git push: %w: %s", err, strings.TrimSpace(out))
 	}
 	return nil
+}
+
+func refExists(ctx context.Context, dir, ref string) bool {
+	_, err := runGit(ctx, dir, "rev-parse", "--verify", ref)
+	return err == nil
 }
 
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {

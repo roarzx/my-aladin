@@ -29,10 +29,25 @@ export interface PlanSummary {
   stepCount: number
 }
 
+export interface IssueAgent {
+  ref: string
+  agentId: string
+  name: string
+  role: string
+}
+
+export interface IssueRepository {
+  id: string
+  url: string
+  defaultBranch: string
+}
+
 export interface IssueDetail {
   task: Task
   plan: PlanSummary | null
   acceptance: unknown
+  agents?: IssueAgent[]
+  repositories?: IssueRepository[]
 }
 
 export interface PlanStep {
@@ -93,7 +108,7 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
@@ -147,4 +162,47 @@ export function retryStep(
     method: 'POST',
     body: JSON.stringify({ instruction, expectedVersion }),
   })
+}
+
+export interface PlanStepInput {
+  ordinal: number
+  title: string
+  body: string
+  agentRef: string
+}
+
+export interface PlanProposal {
+  contentMd: string
+  steps: PlanStepInput[]
+}
+
+export function submitPlan(
+  taskId: string,
+  proposal: PlanProposal,
+): Promise<{ planId: string; revision: number; steps: number }> {
+  return request<{ planId: string; revision: number; steps: number }>(
+    `/issues/${encodeURIComponent(taskId)}/plans`,
+    { method: 'POST', body: JSON.stringify(proposal) },
+  )
+}
+
+export function confirmPlan(
+  planId: string,
+  revision: number,
+  contentHash: string,
+): Promise<{ revision: number; confirmedAt: string }> {
+  return request<{ revision: number; confirmedAt: string }>(
+    `/plans/${encodeURIComponent(planId)}/confirm`,
+    { method: 'POST', body: JSON.stringify({ revision, contentHash }) },
+  )
+}
+
+export function startTask(
+  taskId: string,
+  expectedVersion: number,
+): Promise<{ startedAt: string; status: TaskStatus }> {
+  return request<{ startedAt: string; status: TaskStatus }>(
+    `/issues/${encodeURIComponent(taskId)}/start`,
+    { method: 'POST', body: JSON.stringify({ expectedVersion }) },
+  )
 }

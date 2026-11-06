@@ -56,6 +56,11 @@ type Config struct {
 	MCPServers        []any
 	InitializeTimeout time.Duration
 	InputTimeout      time.Duration
+	// SystemPrompt 通过 ACP session/new 的 systemPrompt.append 注入。
+	SystemPrompt string
+	// AutoApprovePermissions 为 true 时自动选择 allow_once/allow_always 权限选项。
+	// 仅应在受信任的任务工作区开启。
+	AutoApprovePermissions bool
 }
 
 // Provider 负责启动、探活与会话创建。
@@ -237,10 +242,19 @@ func (s *Session) ACPID() string { return s.acpSessionID }
 
 // New 创建新会话。
 func (s *Session) New(ctx context.Context) error {
-	raw, err := s.client.Call(ctx, "session/new", map[string]any{
+	params := map[string]any{
 		"cwd":        s.provider.cfg.Cwd,
 		"mcpServers": mcpServers(s.provider.cfg.MCPServers),
-	})
+	}
+	if s.provider.cfg.SystemPrompt != "" {
+		params["systemPrompt"] = map[string]any{
+			"mode": "append",
+			"content": []map[string]any{
+				{"type": "text", "text": s.provider.cfg.SystemPrompt},
+			},
+		}
+	}
+	raw, err := s.client.Call(ctx, "session/new", params)
 	if err != nil {
 		return errcode.Newf(errcode.RuntimeStartFailed, "session/new 失败: %v", err)
 	}
@@ -354,14 +368,49 @@ func (s *Session) handleNotification(method string, params json.RawMessage) {
 	}
 }
 
-// handleRequest 对 Agent 反向请求做 fail-closed 处理（9.7.1 v1 不启用 fs/terminal）。
-func (s *Session) handleRequest(method string, _ json.RawMessage) (json.RawMessage, *rpcError) {
+// handleRequest 对 Agent 反向请求做处理（9.7.1 v1 不启用 fs/terminal）。
+//
+// 权限：默认 fail-closed；开启 AutoApprovePermissions 后选择 allow_once/allow_always。
+func (s *Session) handleRequest(method string, params json.RawMessage) (json.RawMessage, *rpcError) {
 	switch method {
 	case "session/request_permission":
+		if s.provider.cfg.AutoApprovePermissions {
+			if optionID := allowOptionID(params); optionID != "" {
+				response, _ := json.Marshal(map[string]any{
+					"outcome": map[string]any{"outcome": "selected", "optionId": optionID},
+				})
+				return response, nil
+			}
+		}
 		return json.RawMessage(`{"outcome":{"outcome":"cancelled"}}`), nil
 	default:
 		return nil, &rpcError{Code: -32601, Message: "unsupported method"}
 	}
+}
+
+func allowOptionID(params json.RawMessage) string {
+	var request struct {
+		Options []struct {
+			OptionID string `json:"optionId"`
+			Kind     string `json:"kind"`
+		} `json:"options"`
+	}
+	if err := json.Unmarshal(params, &request); err != nil {
+		return ""
+	}
+	for _, kind := range []string{"allow_once", "allow_always"} {
+		for _, option := range request.Options {
+			if option.Kind == kind && option.OptionID != "" {
+				return option.OptionID
+			}
+		}
+	}
+	for _, option := range request.Options {
+		if option.OptionID == "allow-once" || option.OptionID == "allow-with-updates" {
+			return option.OptionID
+		}
+	}
+	return ""
 }
 
 func mcpServers(servers []any) []any {

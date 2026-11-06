@@ -127,6 +127,67 @@ func TestPushOnlyPlanBranch(t *testing.T) {
 	gitCmd(t, origin, "rev-parse", "--verify", "refs/heads/feature")
 }
 
+func TestCommitAllSetsBotIdentityAndPushes(t *testing.T) {
+	// 隔离本机 git 配置，确保提交使用仓库本地身份。
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+	origin := setupOrigin(t)
+	dir := filepath.Join(t.TempDir(), "work")
+	ctx := context.Background()
+
+	w, err := Prepare(ctx, RepoSpec{URL: origin, Dir: dir, PlanBranch: "feature"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err := w.HasChanges(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed {
+		t.Fatal("干净工作区不应有改动")
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("change\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changed, err = w.HasChanges(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("新增文件应判定为有改动")
+	}
+
+	sha, err := w.CommitAll(ctx, "aladdin: task")
+	if err != nil {
+		t.Fatalf("CommitAll: %v", err)
+	}
+	if len(sha) != 40 {
+		t.Fatalf("commit_sha = %q", sha)
+	}
+	if head := gitCmd(t, dir, "rev-parse", "HEAD"); head != sha {
+		t.Fatalf("HEAD = %q, commit_sha = %q", head, sha)
+	}
+	if author := gitCmd(t, dir, "log", "-1", "--format=%an <%ae>"); author != "Aladdin Bot <aladdin@example.com>" {
+		t.Fatalf("提交身份 = %q", author)
+	}
+	if subject := gitCmd(t, dir, "log", "-1", "--format=%s"); subject != "aladdin: task" {
+		t.Fatalf("提交信息 = %q", subject)
+	}
+	if changed, err := w.HasChanges(ctx); err != nil || changed {
+		t.Fatalf("提交后应为干净工作区: changed=%v err=%v", changed, err)
+	}
+
+	if err := w.Push(ctx, "feature"); err != nil {
+		t.Fatalf("推送计划分支: %v", err)
+	}
+	if remote := gitCmd(t, origin, "rev-parse", "refs/heads/feature"); remote != sha {
+		t.Fatalf("远端分支 = %q, 期望 %q", remote, sha)
+	}
+}
+
 func TestDiffAndCommits(t *testing.T) {
 	origin := setupOrigin(t)
 	dir := filepath.Join(t.TempDir(), "work")

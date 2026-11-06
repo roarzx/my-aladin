@@ -1,5 +1,12 @@
-import { useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 
+import {
+  createMachine,
+  fetchMachines,
+  fetchWorkspaces,
+  type Machine,
+} from '../api/controlplane'
+import { ApiError } from '../api/issues'
 import AppShell from '../components/AppShell'
 import { IconPlus, IconRefresh } from '../components/icons'
 import { EmptyState, StateTag, toast } from '../components/ui'
@@ -8,60 +15,88 @@ import '../styles/pages-resources.css'
 
 /* ------------------------------------------------------------------
    机器管理 /machines
-   对照 hercules-frontend MachinesPage：panel-head + machine-grid。
-   本地 Go 后端仅提供 Issue 接口，这里不伪造数据与接口。
+   真实数据：GET /workspaces → GET /machines?workspaceId=；
+   注册弹窗调用 POST /machines，展示一次性 token 与 daemon 启动命令。
    ------------------------------------------------------------------ */
 
-interface MachineCardRow {
-  id: string
-  name: string
-  hostname: string
-  ip: string
-  os: string
-  status: 'online' | 'busy' | 'offline'
-  cloud: boolean
-  shared: boolean
-  lastSeen: string
-  cliVersion: string
-}
-
-/** 本地后端尚未提供机器能力，接口接入前列表恒为空。 */
-const MACHINES: MachineCardRow[] = []
-
-const MACHINE_STATUS: Record<MachineCardRow['status'], { label: string; tone: string }> = {
+const MACHINE_STATUS: Record<string, { label: string; tone: string }> = {
   online: { label: '在线', tone: 'done' },
   busy: { label: '忙碌', tone: 'running' },
   offline: { label: '离线', tone: 'muted' },
 }
 
-type MachineType = 'on_premise' | 'cloud'
+function machineStatusMeta(status: string): { label: string; tone: string } {
+  return MACHINE_STATUS[status] ?? { label: status || '未知', tone: 'muted' }
+}
+
+function formatTime(value: string | null): string {
+  if (!value) return '暂无数据'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+/** 机器注册成功后的 daemon 启动命令（密钥只返回一次明文）。 */
+export function daemonCommand(machine: Machine, token: string): string {
+  return [
+    `ALADDIN_MACHINE_TOKEN=${token} \\`,
+    'make build && \\',
+    './bin/daemon --config config/config.yaml --profile default \\',
+    `  --machine-id ${machine.id}`,
+  ].join('\n')
+}
+
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    toast('已复制到剪贴板')
+  } catch {
+    toast('复制失败，请手动选择复制')
+  }
+}
+
+interface RegisteredMachine {
+  machine: Machine
+  token: string
+  expiresAt: string
+}
 
 export function CreateMachineModal({
-  defaultCloud = false,
+  workspaceId,
   onClose,
+  onRegistered,
 }: {
-  defaultCloud?: boolean
+  workspaceId: string
   onClose: () => void
+  onRegistered: () => void
 }) {
-  const [machineType, setMachineType] = useState<MachineType>(defaultCloud ? 'cloud' : 'on_premise')
   const [name, setName] = useState('')
+  const [kind, setKind] = useState('local')
   const [notice, setNotice] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [registered, setRegistered] = useState<RegisteredMachine | null>(null)
 
-  const cloud = machineType === 'cloud'
-  const title = cloud ? '创建云机器' : '注册机器'
-
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault()
-    if (!name.trim()) {
+    const trimmed = name.trim()
+    if (!trimmed) {
       setNotice('请输入机器名称。')
       return
     }
-    if (name.trim().length > 64) {
+    if (trimmed.length > 64) {
       setNotice('机器名称不能超过64个字符。')
       return
     }
-    setNotice('本地后端尚未提供该能力，注册不会写入数据库。')
-    toast(`本地后端尚未提供该能力，未能${cloud ? '创建' : '注册'}机器：${name.trim()}。`)
+    setSubmitting(true)
+    setNotice('')
+    try {
+      const result = await createMachine({ workspaceId, name: trimmed, kind })
+      setRegistered(result)
+      onRegistered()
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : String(err))
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -72,103 +107,133 @@ export function CreateMachineModal({
         if (event.target === event.currentTarget) onClose()
       }}
     >
-      <div className="modal" role="dialog" aria-modal="true" aria-label={title} style={{ width: 'min(680px, 100%)' }}>
-        <form onSubmit={submit}>
-          <div className="modal-head">
-            <h3>{title}</h3>
-            <button type="button" className="button ghost small" onClick={onClose}>
-              关闭
-            </button>
-          </div>
-          <div className="modal-body">
-            <div className="resource-modal-form">
-              <div className="field wide">
-                <span id="machine-type-label">机器类型</span>
-                <div className="resource-radio-cards" role="radiogroup" aria-labelledby="machine-type-label">
-                  <label className={`resource-radio-card ${machineType === 'on_premise' ? 'active' : ''}`}>
-                    <input
-                      type="radio"
-                      name="machine-type"
-                      checked={machineType === 'on_premise'}
-                      onChange={() => setMachineType('on_premise')}
-                    />
-                    <span>
-                      本地 / 自有机器
-                      <small>在自有主机上安装 CLI 并注册，使用机器密钥接入。</small>
-                    </span>
-                  </label>
-                  <label className={`resource-radio-card ${machineType === 'cloud' ? 'active' : ''}`}>
-                    <input
-                      type="radio"
-                      name="machine-type"
-                      checked={machineType === 'cloud'}
-                      onChange={() => setMachineType('cloud')}
-                    />
-                    <span>
-                      云端机器
-                      <small>由平台按需创建云实例，任务运行时自动启动。</small>
-                    </span>
-                  </label>
-                </div>
-              </div>
-
-              <label className="field wide">
-                <span>机器名称</span>
-                <input
-                  value={name}
-                  maxLength={64}
-                  placeholder="请输入机器名称，如 build-01"
-                  onChange={(event) => setName(event.target.value)}
-                />
-              </label>
-
-              <p className="resource-page-note">
-                {cloud
-                  ? '创建成功后任务需要时会自动调度云端实例启动。'
-                  : '注册成功后会生成一次性机器密钥，将其配置到目标机器的 CLI 环境中。'}
-              </p>
-
-              {notice ? (
-                <p className="notice warn" role="status">
-                  {notice}
-                </p>
-              ) : null}
+      <div className="modal" role="dialog" aria-modal="true" aria-label="注册机器" style={{ width: 'min(680px, 100%)' }}>
+        {registered ? (
+          <>
+            <div className="modal-head">
+              <h3>机器注册成功</h3>
+              <button type="button" className="button ghost small" onClick={onClose}>
+                关闭
+              </button>
             </div>
-          </div>
-          <div className="modal-foot">
-            <button type="button" className="button subtle" onClick={onClose}>
-              取消
-            </button>
-            <button type="submit" className="button primary">
-              {cloud ? '创建' : '注册'}
-            </button>
-          </div>
-        </form>
+            <div className="modal-body">
+              <div className="resource-modal-form">
+                <p className="notice warn" role="status">
+                  机器密钥仅展示一次，请立即复制保存；有效期至 {formatTime(registered.expiresAt)}。
+                </p>
+                <div className="field wide">
+                  <span>机器 ID</span>
+                  <div className="copy-row">
+                    <code>{registered.machine.id}</code>
+                    <button
+                      type="button"
+                      className="button ghost small"
+                      onClick={() => void copyText(registered.machine.id)}
+                    >
+                      复制
+                    </button>
+                  </div>
+                </div>
+                <div className="field wide">
+                  <span>机器密钥（ALADDIN_MACHINE_TOKEN）</span>
+                  <div className="copy-row">
+                    <code>{registered.token}</code>
+                    <button
+                      type="button"
+                      className="button ghost small"
+                      onClick={() => void copyText(registered.token)}
+                    >
+                      复制
+                    </button>
+                  </div>
+                </div>
+                <div className="field wide">
+                  <span>daemon 启动命令</span>
+                  <pre className="daemon-command">{daemonCommand(registered.machine, registered.token)}</pre>
+                  <button
+                    type="button"
+                    className="button ghost small"
+                    onClick={() => void copyText(daemonCommand(registered.machine, registered.token))}
+                  >
+                    复制启动命令
+                  </button>
+                </div>
+                <p className="resource-page-note">
+                  在目标机器上执行以上命令启动 daemon，上线后本页将显示「在线」。
+                </p>
+              </div>
+            </div>
+            <div className="modal-foot">
+              <button type="button" className="button primary" onClick={onClose}>
+                完成
+              </button>
+            </div>
+          </>
+        ) : (
+          <form onSubmit={(event) => void submit(event)}>
+            <div className="modal-head">
+              <h3>注册机器</h3>
+              <button type="button" className="button ghost small" onClick={onClose}>
+                关闭
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="resource-modal-form">
+                <label className="field wide">
+                  <span>机器名称</span>
+                  <input
+                    value={name}
+                    maxLength={64}
+                    placeholder="请输入机器名称，如 build-01"
+                    onChange={(event) => setName(event.target.value)}
+                  />
+                </label>
+                <label className="field wide">
+                  <span>机器类型</span>
+                  <select value={kind} onChange={(event) => setKind(event.target.value)}>
+                    <option value="local">local（本地/自有机器）</option>
+                    <option value="cloud">cloud（云端机器）</option>
+                  </select>
+                </label>
+                <p className="resource-page-note">
+                  注册成功后会生成一次性机器密钥，将其配置到目标机器的 daemon 环境中。
+                </p>
+                {notice ? (
+                  <p className="notice warn" role="status">
+                    {notice}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+            <div className="modal-foot">
+              <button type="button" className="button subtle" onClick={onClose}>
+                取消
+              </button>
+              <button type="submit" className="button primary" disabled={submitting}>
+                {submitting ? '注册中…' : '注册'}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   )
 }
 
-function MachineCard({ machine }: { machine: MachineCardRow }) {
-  const meta = MACHINE_STATUS[machine.status]
+function MachineCard({ machine }: { machine: Machine }) {
+  const meta = machineStatusMeta(machine.status)
   return (
     <Link className={`machine-card ${machine.status}`} to={`/machine-detail?id=${encodeURIComponent(machine.id)}`}>
       <div className="machine-top">
-        <strong>
-          {machine.name}
-          {machine.cloud ? <em className="cloud-badge">云机器</em> : null}
-          {machine.shared ? <em className="shared-badge">共享</em> : null}
-        </strong>
+        <strong>{machine.name}</strong>
         <StateTag tone={meta.tone}>{meta.label}</StateTag>
       </div>
       <div className="machine-meta">
-        <span>{machine.ip || '暂无 IP'}</span>
-        <span>{machine.os || 'unknown'}</span>
+        <span>{machine.kind || 'unknown'}</span>
         <span>CLI {machine.cliVersion || '暂无数据'}</span>
       </div>
-      <p>宿主机：{machine.hostname || '暂无数据'}</p>
       <div className="machine-foot">
-        <span>最近心跳：{machine.lastSeen || '暂无数据'}</span>
+        <span>最近心跳：{formatTime(machine.lastSeenAt)}</span>
         <span>查看机器详情</span>
       </div>
     </Link>
@@ -176,17 +241,44 @@ function MachineCard({ machine }: { machine: MachineCardRow }) {
 }
 
 export default function Machines() {
+  const [workspaceId, setWorkspaceId] = useState('')
+  const [machines, setMachines] = useState<Machine[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
-  const [groupFilter, setGroupFilter] = useState<'all' | 'mine'>('all')
 
-  const machines = groupFilter === 'mine' ? MACHINES.filter((item) => !item.shared) : MACHINES
+  const load = useCallback(async () => {
+    setError('')
+    try {
+      let wid = workspaceId
+      if (!wid) {
+        const workspaces = await fetchWorkspaces()
+        if (workspaces.length === 0) {
+          setMachines([])
+          setLoading(false)
+          return
+        }
+        wid = workspaces[0].id
+        setWorkspaceId(wid)
+      }
+      setMachines(await fetchMachines(wid))
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }, [workspaceId])
+
+  useEffect(() => {
+    void load()
+  }, [load])
 
   return (
     <AppShell
       title="机器与 CLI 接入"
       breadcrumb="机器管理"
       actions={
-        <button type="button" className="button ghost" onClick={() => toast('本地后端尚未提供该能力，无法刷新机器列表。')}>
+        <button type="button" className="button ghost" onClick={() => void load()}>
           <IconRefresh width={15} height={15} /> 刷新
         </button>
       }
@@ -198,10 +290,7 @@ export default function Machines() {
             <p>注册 CLI 执行环境，查看心跳与挂载 Agent。</p>
           </div>
           <div className="panel-actions">
-            <button type="button" className="button ghost" onClick={() => setGroupFilter(groupFilter === 'all' ? 'mine' : 'all')}>
-              {groupFilter === 'all' ? '只看我的开发机' : '查看全部机器'}
-            </button>
-            <button type="button" className="button primary" onClick={() => setCreateOpen(true)}>
+            <button type="button" className="button primary" onClick={() => setCreateOpen(true)} disabled={!workspaceId}>
               <IconPlus width={15} height={15} /> 注册机器
             </button>
           </div>
@@ -212,7 +301,15 @@ export default function Machines() {
           <span>共 {machines.length} 台</span>
         </div>
 
-        {machines.length ? (
+        {error ? (
+          <p className="notice danger" role="alert">
+            加载失败:{error}
+          </p>
+        ) : null}
+
+        {loading ? (
+          <div className="empty-inline">加载中…</div>
+        ) : machines.length ? (
           <div className="machine-grid">
             {machines.map((machine) => (
               <MachineCard key={machine.id} machine={machine} />
@@ -222,9 +319,9 @@ export default function Machines() {
           <div className="empty-inline">
             <EmptyState
               title="当前用户暂无机器"
-              description="本地后端尚未提供该能力。页面结构按阿拉丁设计还原，接入接口后即可展示机器心跳与挂载 Agent。"
+              description="注册一台机器并启动 daemon 后，即可创建 Agent 并执行任务。"
               action={
-                <button type="button" className="button ghost" onClick={() => setCreateOpen(true)}>
+                <button type="button" className="button ghost" onClick={() => setCreateOpen(true)} disabled={!workspaceId}>
                   注册机器
                 </button>
               }
@@ -233,7 +330,13 @@ export default function Machines() {
         )}
       </section>
 
-      {createOpen ? <CreateMachineModal onClose={() => setCreateOpen(false)} /> : null}
+      {createOpen ? (
+        <CreateMachineModal
+          workspaceId={workspaceId}
+          onClose={() => setCreateOpen(false)}
+          onRegistered={() => void load()}
+        />
+      ) : null}
     </AppShell>
   )
 }

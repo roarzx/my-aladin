@@ -424,6 +424,122 @@
 
 .timeline-item .kind { color: var(--text); font-weight: 600; }
 
+.timeline-item .timeline-payload {
+  flex: 1 1 100%;
+  margin: 0;
+  padding: 4px 6px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.timeline-item .timeline-pr {
+  margin-left: auto;
+  color: var(--blue);
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.timeline-item .timeline-pr:hover { text-decoration: underline; }
+
+/* ---------- 提交计划表单 ---------- */
+
+.plan-form {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--line);
+}
+
+.plan-form .form-actions { margin-top: 0; }
+
+/* 本页只引入 pages-issues.css，正文输入框的样式在此就地定义。 */
+.plan-form .system-prompt-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.plan-form .system-prompt-input:focus {
+  outline: 2px solid var(--blue-soft);
+  border-color: var(--blue);
+}
+
+.plan-steps-editor {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.plan-step-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  width: 100%;
+  padding: 8px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.plan-step-index {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-step-fields {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.plan-step-fields input,
+.plan-step-fields textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.plan-step-fields input:focus,
+.plan-step-fields textarea:focus {
+  outline: 2px solid var(--blue-soft);
+  border-color: var(--blue);
+}
+
+.plan-step-fields .plan-step-agent {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
 .stream-state {
   display: inline-flex;
   align-items: center;
@@ -447,4 +563,6 @@
   .issue-list-table .data-table-row { grid-template-columns: 1.6fr 100px 150px; }
   .issue-list-table .data-table-row > :nth-child(3),
   .issue-list-table .data-table-row > :nth-child(4) { display: none; }
+  .plan-step-row { grid-template-columns: 24px minmax(0, 1fr); }
+  .plan-step-row > .button { grid-column: 2; justify-self: start; }
 }

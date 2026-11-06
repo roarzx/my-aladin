@@ -60,6 +60,41 @@ func MemberRole(ctx context.Context, ex Executor, workspaceID string, userID uin
 	return role, nil
 }
 
+// WorkspaceMembership 是用户加入的工作区及其角色。
+type WorkspaceMembership struct {
+	ID   string
+	Name string
+	Role domain.Role
+}
+
+// ListWorkspacesForUser 列出用户加入的工作区（按名称排序）。
+func ListWorkspacesForUser(ctx context.Context, ex Executor, userID uint64) ([]WorkspaceMembership, error) {
+	rows, err := ex.QueryContext(ctx, `
+		SELECT w.id, w.name, m.role
+		FROM workspaces w
+		JOIN workspace_members m ON m.workspace_id = w.id
+		WHERE m.user_id = ?
+		ORDER BY w.name`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("列出工作区: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]WorkspaceMembership, 0, 8)
+	for rows.Next() {
+		var (
+			ws   WorkspaceMembership
+			role string
+		)
+		if err := rows.Scan(&ws.ID, &ws.Name, &role); err != nil {
+			return nil, err
+		}
+		ws.Role = domain.Role(role)
+		out = append(out, ws)
+	}
+	return out, rows.Err()
+}
+
 // WorkspaceStore 是 *sql.DB 之上的轻量仓储，供 HTTP 层做成员校验。
 type WorkspaceStore struct {
 	DB *sql.DB

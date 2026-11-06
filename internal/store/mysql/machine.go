@@ -55,13 +55,106 @@ func HeartbeatMachine(ctx context.Context, ex Executor, id string) error {
 		return err
 	}
 	if n == 0 {
-		return sql.ErrNoRows
+		exists, err := rowExists(ctx, ex, `SELECT COUNT(*) FROM machines WHERE id = ?`, id)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return sql.ErrNoRows
+		}
+	}
+	return nil
+}
+
+// CreateMachine 插入机器记录（控制面注册用），默认离线。
+// 同一工作区名称冲突返回 ErrMachineNameTaken。
+func CreateMachine(ctx context.Context, ex Executor, m machine.Machine) error {
+	caps, err := machine.EncodeCapabilities(m.Capabilities)
+	if err != nil {
+		return err
+	}
+	status := m.Status
+	if status == "" {
+		status = machine.StatusOffline
+	}
+	_, err = ex.ExecContext(ctx, `
+		INSERT INTO machines (id, workspace_id, name, kind, status, capabilities, cli_version, last_seen_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.WorkspaceID, m.Name, string(m.Kind), string(status), caps,
+		nullString(m.CLIVersion), m.LastSeenAt)
+	if isDuplicateKey(err) {
+		return ErrMachineNameTaken
+	}
+	if err != nil {
+		return fmt.Errorf("创建机器: %w", err)
+	}
+	return nil
+}
+
+// ErrMachineNameTaken 表示同一工作区内的机器名称已被占用。
+var ErrMachineNameTaken = errors.New("机器名称已存在")
+
+// ListMachinesByWorkspace 列出工作区内的机器。
+func ListMachinesByWorkspace(ctx context.Context, ex Executor, workspaceID string) ([]machine.Machine, error) {
+	rows, err := ex.QueryContext(ctx, `
+		SELECT id, workspace_id, name, kind, status, capabilities, cli_version, last_seen_at
+		FROM machines WHERE workspace_id = ?
+		ORDER BY name`, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("列出机器: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]machine.Machine, 0, 8)
+	for rows.Next() {
+		m, err := scanMachine(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// MarkMachineOffline 在连接断开时置为离线。
+func MarkMachineOffline(ctx context.Context, ex Executor, id string) error {
+	res, err := ex.ExecContext(ctx,
+		`UPDATE machines SET status = 'offline' WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("标记机器离线: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		exists, err := rowExists(ctx, ex, `SELECT COUNT(*) FROM machines WHERE id = ?`, id)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return sql.ErrNoRows
+		}
 	}
 	return nil
 }
 
 // GetMachine 读取机器记录。
 func GetMachine(ctx context.Context, ex Executor, id string) (machine.Machine, error) {
+	row := ex.QueryRowContext(ctx, `
+		SELECT id, workspace_id, name, kind, status, capabilities, cli_version, last_seen_at
+		FROM machines WHERE id = ?`, id)
+	m, err := scanMachine(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return machine.Machine{}, sql.ErrNoRows
+	}
+	if err != nil {
+		return machine.Machine{}, fmt.Errorf("读取机器: %w", err)
+	}
+	return m, nil
+}
+
+func scanMachine(row rowScanner) (machine.Machine, error) {
 	var (
 		m        machine.Machine
 		kind     string
@@ -70,15 +163,10 @@ func GetMachine(ctx context.Context, ex Executor, id string) (machine.Machine, e
 		cliVer   sql.NullString
 		lastSeen sql.NullTime
 	)
-	err := ex.QueryRowContext(ctx, `
-		SELECT id, workspace_id, name, kind, status, capabilities, cli_version, last_seen_at
-		FROM machines WHERE id = ?`, id).Scan(
+	err := row.Scan(
 		&m.ID, &m.WorkspaceID, &m.Name, &kind, &status, &rawCaps, &cliVer, &lastSeen)
-	if errors.Is(err, sql.ErrNoRows) {
-		return machine.Machine{}, sql.ErrNoRows
-	}
 	if err != nil {
-		return machine.Machine{}, fmt.Errorf("读取机器: %w", err)
+		return machine.Machine{}, err
 	}
 	caps, err := machine.ParseCapabilities(rawCaps)
 	if err != nil {

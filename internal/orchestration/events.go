@@ -24,6 +24,7 @@ type stepDoneData struct {
 	SummaryDigest string `json:"summary_digest"`
 	CommitSHA     string `json:"commit_sha"`
 	Branch        string `json:"branch"`
+	PRURL         string `json:"pr_url"`
 }
 
 type stepFailData struct {
@@ -98,7 +99,8 @@ func (h *EventHandler) complete(ctx context.Context, env protocol.Envelope, data
 	}
 	if plan, _, err := mysqlstore.GetPlanByID(ctx, h.DB, step.PlanID); err == nil {
 		_, _ = mysqlstore.AppendActivity(ctx, h.DB, plan.TaskID, "step.done", map[string]any{
-			"step_id": step.ID, "attempt_no": attempt.AttemptNo, "commit_sha": done.CommitSHA,
+			"step_id": step.ID, "attempt_no": attempt.AttemptNo,
+			"commit_sha": done.CommitSHA, "pr_url": done.PRURL,
 		})
 	}
 	return h.advance(ctx, step.PlanID)

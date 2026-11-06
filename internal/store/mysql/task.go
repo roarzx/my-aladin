@@ -86,6 +86,83 @@ func GetTask(ctx context.Context, ex Executor, id string) (domain.Task, error) {
 	return t, nil
 }
 
+// TaskAgent 是任务成员及其 Agent 名称。
+type TaskAgent struct {
+	Ref     string
+	AgentID string
+	Name    string
+	Role    string
+}
+
+// ListTaskAgents 列出任务成员（含 Agent 名称），按 ref 的自然顺序排序。
+func ListTaskAgents(ctx context.Context, ex Executor, taskID string) ([]TaskAgent, error) {
+	rows, err := ex.QueryContext(ctx, `
+		SELECT ta.agent_ref, ta.agent_id, a.name, ta.role
+		FROM task_agents ta
+		JOIN agents a ON a.id = ta.agent_id
+		WHERE ta.task_id = ?
+		ORDER BY CHAR_LENGTH(ta.agent_ref), ta.agent_ref`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("列出任务成员: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]TaskAgent, 0, 4)
+	for rows.Next() {
+		var ta TaskAgent
+		if err := rows.Scan(&ta.Ref, &ta.AgentID, &ta.Name, &ta.Role); err != nil {
+			return nil, err
+		}
+		out = append(out, ta)
+	}
+	return out, rows.Err()
+}
+
+// TaskRepository 是任务绑定的仓库及其元数据。
+type TaskRepository struct {
+	RepositoryID  string
+	URL           string
+	DefaultBranch string
+	Provider      string
+	BaseSHA       string
+	TargetBranch  string
+}
+
+// ListTaskRepositories 列出任务绑定的仓库（含仓库元数据），按 URL 排序。
+func ListTaskRepositories(ctx context.Context, ex Executor, taskID string) ([]TaskRepository, error) {
+	rows, err := ex.QueryContext(ctx, `
+		SELECT r.id, r.url, r.default_branch, r.provider, tr.base_sha, tr.target_branch
+		FROM task_repositories tr
+		JOIN repositories r ON r.id = tr.repository_id
+		WHERE tr.task_id = ?
+		ORDER BY r.url`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("列出任务仓库: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]TaskRepository, 0, 2)
+	for rows.Next() {
+		var tr TaskRepository
+		if err := rows.Scan(&tr.RepositoryID, &tr.URL, &tr.DefaultBranch,
+			&tr.Provider, &tr.BaseSHA, &tr.TargetBranch); err != nil {
+			return nil, err
+		}
+		out = append(out, tr)
+	}
+	return out, rows.Err()
+}
+
+// UpdateTaskRepositoryTargetBranch 在启动时把任务仓库的目标分支写为计划分支。
+func UpdateTaskRepositoryTargetBranch(ctx context.Context, ex Executor, taskID, branch string) error {
+	_, err := ex.ExecContext(ctx,
+		`UPDATE task_repositories SET target_branch = ? WHERE task_id = ?`, branch, taskID)
+	if err != nil {
+		return fmt.Errorf("更新任务仓库目标分支: %w", err)
+	}
+	return nil
+}
+
 func nullString(s string) any {
 	if s == "" {
 		return nil

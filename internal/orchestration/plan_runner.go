@@ -81,6 +81,16 @@ func (r *PlanRunner) RunOnce(ctx context.Context, taskID string) error {
 		return r.failStep(ctx, *next, err)
 	}
 
+	// 任务可能绑定多个仓库，当前串行执行仅使用第一个（按 URL 排序）。
+	repos, err := mysqlstore.ListTaskRepositories(ctx, r.DB, taskID)
+	if err != nil {
+		return err
+	}
+	var repo mysqlstore.TaskRepository
+	if len(repos) > 0 {
+		repo = repos[0]
+	}
+
 	newVersion, err := mysqlstore.UpdateStepState(ctx, r.DB, next.ID,
 		domain.StepPending, domain.StepExecuting, next.Version)
 	if err != nil {
@@ -114,13 +124,20 @@ func (r *PlanRunner) RunOnce(ctx context.Context, taskID string) error {
 
 	if r.Runtime != nil {
 		_, dispatchErr := r.Runtime.Dispatch(ctx, runtime.DispatchRequest{
-			ExecutionID: executionID,
-			MachineID:   a.MachineID,
-			TaskID:      taskID,
-			StepID:      next.ID,
-			AttemptNo:   attemptNo,
-			LeaseEpoch:  attempt.LeaseEpoch,
-			Branch:      task.PlanBranch,
+			ExecutionID:       executionID,
+			MachineID:         a.MachineID,
+			TaskID:            taskID,
+			StepID:            next.ID,
+			AttemptNo:         attemptNo,
+			LeaseEpoch:        attempt.LeaseEpoch,
+			Branch:            task.PlanBranch,
+			Prompt:            stepPrompt(task.Name, *next),
+			WorkDir:           a.WorkDir,
+			RepoURL:           repo.URL,
+			RepoDefaultBranch: repo.DefaultBranch,
+			SystemPrompt:      a.SystemPrompt,
+			TaskTitle:         task.Name,
+			StepTitle:         next.Title,
 		})
 		if dispatchErr != nil {
 			_, _ = mysqlstore.UpdateStepState(ctx, r.DB, next.ID,
@@ -137,6 +154,11 @@ func (r *PlanRunner) RunOnce(ctx context.Context, taskID string) error {
 		r.Log.Info("步骤已派发", "task", taskID, "step", next.ID, "attempt", attemptNo, "execution", executionID)
 	}
 	return nil
+}
+
+// stepPrompt 按 D9 的格式拼接步骤提示词：任务名 + 步骤标题 + 步骤正文。
+func stepPrompt(taskName string, step domain.Step) string {
+	return taskName + "\n\n" + step.Title + "\n" + step.Body
 }
 
 // nextStep 返回下一个可派发步骤：存在 executing 时返回 nil（串行约束）。

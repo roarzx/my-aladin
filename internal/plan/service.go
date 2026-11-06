@@ -222,6 +222,10 @@ func (s *Service) Start(ctx context.Context, taskID string, expectedVersion uint
 		}
 		task.PlanBranch = branch
 	}
+	// 启动时把计划分支写为任务仓库的目标分支（D6）。
+	if err := mysqlstore.UpdateTaskRepositoryTargetBranch(ctx, tx, taskID, task.PlanBranch); err != nil {
+		return domain.Task{}, errcode.New(errcode.UpstreamUnavailable, "更新任务仓库目标分支失败")
+	}
 
 	before, version := task.Status, task.Version
 	if err := task.Apply(domain.EvPlanConfirmedAndStarted); err != nil {

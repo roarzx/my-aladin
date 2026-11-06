@@ -43,6 +43,19 @@ type planSummary struct {
 	StepCount   int    `json:"stepCount"`
 }
 
+type agentSummary struct {
+	Ref     string `json:"ref"`
+	AgentID string `json:"agentId"`
+	Name    string `json:"name"`
+	Role    string `json:"role"`
+}
+
+type repositorySummary struct {
+	ID            string `json:"id"`
+	URL           string `json:"url"`
+	DefaultBranch string `json:"defaultBranch"`
+}
+
 // Get 处理 GET /issues/{id}：任务 + 计划摘要 + 验收摘要。
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -98,6 +111,30 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	agents, err := mysqlstore.ListTaskAgents(ctx, h.DB, taskID)
+	if err != nil {
+		httpapi.Fail(w, errcode.New(errcode.UpstreamUnavailable, "读取任务成员失败"))
+		return
+	}
+	repos, err := mysqlstore.ListTaskRepositories(ctx, h.DB, taskID)
+	if err != nil {
+		httpapi.Fail(w, errcode.New(errcode.UpstreamUnavailable, "读取任务仓库失败"))
+		return
+	}
+
+	agentViews := make([]agentSummary, 0, len(agents))
+	for _, a := range agents {
+		agentViews = append(agentViews, agentSummary{
+			Ref: a.Ref, AgentID: a.AgentID, Name: a.Name, Role: a.Role,
+		})
+	}
+	repoViews := make([]repositorySummary, 0, len(repos))
+	for _, repo := range repos {
+		repoViews = append(repoViews, repositorySummary{
+			ID: repo.RepositoryID, URL: repo.URL, DefaultBranch: repo.DefaultBranch,
+		})
+	}
+
 	httpapi.Data(w, http.StatusOK, map[string]any{
 		"task": taskView{
 			ID: task.ID, WorkspaceID: task.WorkspaceID, Name: task.Name,
@@ -105,8 +142,10 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 			PlanBranch: task.PlanBranch, CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
 			CancelAt: task.CancelRequestedAt,
 		},
-		"plan":       plan,
-		"acceptance": nil,
+		"plan":         plan,
+		"acceptance":   nil,
+		"agents":       agentViews,
+		"repositories": repoViews,
 	})
 }
 

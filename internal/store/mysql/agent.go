@@ -42,6 +42,9 @@ func scanAgent(row rowScanner) (agent.Agent, error) {
 	return a, nil
 }
 
+// ErrAgentNameTaken 表示同一工作区内的 Agent 名称已被占用。
+var ErrAgentNameTaken = errors.New("agent 名称已存在")
+
 // CreateAgent 写入 Agent 配置。
 func CreateAgent(ctx context.Context, ex Executor, a agent.Agent) error {
 	if err := a.Visibility.Valid(); err != nil {
@@ -62,6 +65,9 @@ func CreateAgent(ctx context.Context, ex Executor, a agent.Agent) error {
 		a.ID, a.WorkspaceID, a.Name, a.OwnerID, string(a.Visibility), string(a.RuntimeType),
 		a.MachineID, a.WorkDir, model, thinking, a.SystemPrompt,
 		a.CapabilitySet, a.EnvVars, a.Enabled)
+	if isDuplicateKey(err) {
+		return ErrAgentNameTaken
+	}
 	if err != nil {
 		return fmt.Errorf("创建 Agent: %w", err)
 	}
@@ -103,6 +109,93 @@ func ListSchedulable(ctx context.Context, ex Executor, workspaceID string, userI
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// ListAgentsByWorkspace 列出工作区内全部 Agent（含停用，管理页使用）。
+func ListAgentsByWorkspace(ctx context.Context, ex Executor, workspaceID string) ([]agent.Agent, error) {
+	rows, err := ex.QueryContext(ctx, `
+		SELECT `+agentColumns+`
+		FROM agents
+		WHERE workspace_id = ?
+		ORDER BY name`, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("列出 Agent: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]agent.Agent, 0, 8)
+	for rows.Next() {
+		a, err := scanAgent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// UpdateAgent 覆盖 Agent 的可变配置；不存在返回 sql.ErrNoRows。
+func UpdateAgent(ctx context.Context, ex Executor, a agent.Agent) error {
+	if err := a.Visibility.Valid(); err != nil {
+		return err
+	}
+	var model, thinking any
+	if a.Model != "" {
+		model = a.Model
+	}
+	if a.ThinkingLevel != "" {
+		thinking = a.ThinkingLevel
+	}
+	res, err := ex.ExecContext(ctx, `
+		UPDATE agents SET name = ?, visibility = ?, runtime_type = ?, machine_id = ?,
+			work_dir = ?, model = ?, thinking_level = ?, system_prompt = ?,
+			capability_set = ?, env_vars = ?, enabled = ?
+		WHERE id = ?`,
+		a.Name, string(a.Visibility), string(a.RuntimeType), a.MachineID,
+		a.WorkDir, model, thinking, a.SystemPrompt,
+		a.CapabilitySet, a.EnvVars, a.Enabled, a.ID)
+	if isDuplicateKey(err) {
+		return ErrAgentNameTaken
+	}
+	if err != nil {
+		return fmt.Errorf("更新 Agent: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		exists, err := rowExists(ctx, ex, `SELECT COUNT(*) FROM agents WHERE id = ?`, a.ID)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return sql.ErrNoRows
+		}
+	}
+	return nil
+}
+
+// SetAgentEnabled 启用/停用 Agent（软删除）；不存在返回 sql.ErrNoRows。
+func SetAgentEnabled(ctx context.Context, ex Executor, id string, enabled bool) error {
+	res, err := ex.ExecContext(ctx, `UPDATE agents SET enabled = ? WHERE id = ?`, enabled, id)
+	if err != nil {
+		return fmt.Errorf("修改 Agent 启用状态: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		exists, err := rowExists(ctx, ex, `SELECT COUNT(*) FROM agents WHERE id = ?`, id)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return sql.ErrNoRows
+		}
+	}
+	return nil
 }
 
 // SetVisibility 仅允许创建者修改可见性；否则返回 sql.ErrNoRows。

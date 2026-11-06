@@ -1,16 +1,20 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 
 import {
+  confirmPlan,
   fetchEvents,
   fetchIssue,
   fetchPlan,
   retryStep,
+  startTask,
+  submitPlan,
   type EventPage,
   type IssueDetail,
   type PlanDetail,
   type PlanStep,
   type TaskStatus,
 } from '../api/issues'
+import { clearTaskDraft, readTaskDraft } from '../api/taskDraft'
 import AppShell from '../components/AppShell'
 import { EmptyState, StateDot, StateTag, type TagTone } from '../components/ui'
 import { useEventStream } from '../hooks/useEventStream'
@@ -21,9 +25,22 @@ export interface CockpitApi {
   fetchIssue: typeof fetchIssue
   fetchPlan: typeof fetchPlan
   retryStep: typeof retryStep
+  /** 提交计划（POST /issues/{id}/plans）；测试注入的 api 可能不提供，故为可选。 */
+  submitPlan?: typeof submitPlan
+  /** 确认计划（POST /plans/{id}/confirm）。 */
+  confirmPlan?: typeof confirmPlan
+  /** 启动任务（POST /issues/{id}/start）。 */
+  startTask?: typeof startTask
 }
 
-const defaultApi: CockpitApi = { fetchIssue, fetchPlan, retryStep }
+const defaultApi: CockpitApi = {
+  fetchIssue,
+  fetchPlan,
+  retryStep,
+  submitPlan,
+  confirmPlan,
+  startTask,
+}
 
 export interface IssueCockpitProps {
   taskId: string
@@ -78,12 +95,46 @@ function stepStatusMeta(status: string): { label: string; tone: TagTone } {
 
 /** 计划状态中文映射，用于「版本 rN · 状态 · N 步」一行。 */
 const PLAN_STATUS_LABELS: Record<string, string> = {
+  idle: '待确认',
   draft: '草稿',
   submitted: '待确认',
   confirmed: '已确认',
+  executing: '执行中',
+  paused: '已暂停',
+  stopped: '已停止',
   completed: '已完成',
   superseded: '已被取代',
   cancelled: '已取消',
+}
+
+/** 时间线事件 payload 的可读摘要；空对象不渲染，避免与事件类型重复。 */
+function eventPayloadText(payload: unknown): string {
+  if (payload === null || typeof payload !== 'object') return ''
+  if (Array.isArray(payload) && payload.length === 0) return ''
+  if (!Array.isArray(payload) && Object.keys(payload as Record<string, unknown>).length === 0) return ''
+  try {
+    return JSON.stringify(payload)
+  } catch {
+    return ''
+  }
+}
+
+/** 从 step.done 事件 payload 中取出 PR 链接（兼容 snake_case 与 camelCase）。 */
+function eventPrUrl(payload: unknown): string {
+  if (payload === null || typeof payload !== 'object') return ''
+  const record = payload as Record<string, unknown>
+  const url = record.pr_url ?? record.prUrl
+  return typeof url === 'string' ? url : ''
+}
+
+interface StepDraft {
+  title: string
+  body: string
+  agentRef: string
+}
+
+function emptyStepDraft(): StepDraft {
+  return { title: '', body: '', agentRef: 'a1' }
 }
 
 /** 步骤卡片的状态色，仅用于呈现；原始状态文本照常展示。 */
@@ -106,6 +157,17 @@ export default function IssueCockpit({
   const [loadError, setLoadError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [retrying, setRetrying] = useState<string | null>(null)
+
+  // 提交计划表单：正文默认取自创建任务时暂存在浏览器侧的描述。
+  const [planContent, setPlanContent] = useState('')
+  const [planSteps, setPlanSteps] = useState<StepDraft[]>(() => [emptyStepDraft()])
+  const [planNotice, setPlanNotice] = useState('')
+  const [planBusy, setPlanBusy] = useState<'submit' | 'confirm' | 'start' | null>(null)
+
+  useEffect(() => {
+    if (!taskId) return
+    setPlanContent((prev) => prev || readTaskDraft(taskId))
+  }, [taskId])
 
   // 空 taskId 时不应发起轮询，直接返回空页，避免无意义请求。
   const fetchStream = useCallback(
@@ -231,6 +293,106 @@ export default function IssueCockpit({
   const steps = planDetail?.steps ?? []
   const statusLabel = STATUS_LABELS[task.status] ?? task.status
   const statusTone = STATUS_TONES[task.status] ?? 'muted'
+  // 计划摘要与计划详情可能先后到达，优先用更完整的详情。
+  const activePlan = planDetail?.plan ?? detail.plan
+  const planIdle = activePlan?.status === 'idle'
+
+  const updateStepDraft = (index: number, patch: Partial<StepDraft>) => {
+    setPlanSteps((prev) => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)))
+  }
+
+  const addStepDraft = () => {
+    setPlanSteps((prev) => [...prev, { ...emptyStepDraft(), agentRef: prev[prev.length - 1]?.agentRef || 'a1' }])
+  }
+
+  const removeStepDraft = (index: number) => {
+    setPlanSteps((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)))
+  }
+
+  const submitProposal = async (event: FormEvent) => {
+    event.preventDefault()
+    const content = planContent.trim()
+    if (!content) {
+      setPlanNotice('请输入计划正文。')
+      return
+    }
+    if (planSteps.length === 0) {
+      setPlanNotice('至少添加 1 个步骤。')
+      return
+    }
+    for (let i = 0; i < planSteps.length; i += 1) {
+      const item = planSteps[i]
+      if (!item.title.trim()) {
+        setPlanNotice(`第 ${i + 1} 步需要填写标题。`)
+        return
+      }
+      if (!item.agentRef.trim()) {
+        setPlanNotice(`第 ${i + 1} 步需要填写 agentRef（默认 a1）。`)
+        return
+      }
+    }
+    const submit = api.submitPlan
+    if (!submit) {
+      setPlanNotice('当前环境不支持提交计划。')
+      return
+    }
+
+    setPlanBusy('submit')
+    setPlanNotice('')
+    setActionError(null)
+    try {
+      await submit(taskId, {
+        contentMd: content,
+        steps: planSteps.map((item, i) => ({
+          ordinal: i + 1,
+          title: item.title.trim(),
+          body: item.body.trim(),
+          agentRef: item.agentRef.trim(),
+        })),
+      })
+      clearTaskDraft(taskId)
+      await reload()
+    } catch (err) {
+      setPlanNotice(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPlanBusy(null)
+    }
+  }
+
+  const confirmOnly = async () => {
+    const confirm = api.confirmPlan
+    if (!activePlan || !confirm) return
+    setPlanBusy('confirm')
+    setActionError(null)
+    try {
+      await confirm(activePlan.id, activePlan.revision, activePlan.contentHash)
+      await reload()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPlanBusy(null)
+    }
+  }
+
+  const confirmAndStart = async () => {
+    const confirm = api.confirmPlan
+    const start = api.startTask
+    if (!activePlan || !confirm || !start) {
+      setActionError('当前环境不支持启动任务。')
+      return
+    }
+    setPlanBusy('start')
+    setActionError(null)
+    try {
+      await confirm(activePlan.id, activePlan.revision, activePlan.contentHash)
+      await start(taskId, detail.task.version)
+      await reload()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPlanBusy(null)
+    }
+  }
 
   return (
     <AppShell
@@ -267,12 +429,103 @@ export default function IssueCockpit({
             <div>
               <h2 id="plan-heading">计划</h2>
               <p>
-                {detail.plan
-                  ? `版本 r${detail.plan.revision} · ${PLAN_STATUS_LABELS[detail.plan.status] ?? detail.plan.status} · ${detail.plan.stepCount} 步`
+                {activePlan
+                  ? `版本 r${activePlan.revision} · ${PLAN_STATUS_LABELS[activePlan.status] ?? activePlan.status} · ${detail.plan?.stepCount ?? steps.length} 步`
                   : '尚未提交计划'}
               </p>
             </div>
+            {planIdle && activePlan ? (
+              <div className="panel-actions">
+                <button
+                  type="button"
+                  className="button ghost small"
+                  disabled={planBusy !== null || !api.confirmPlan}
+                  onClick={() => void confirmOnly()}
+                >
+                  {planBusy === 'confirm' ? '确认中…' : '确认计划'}
+                </button>
+                <button
+                  type="button"
+                  className="button primary small"
+                  disabled={planBusy !== null || !api.confirmPlan || !api.startTask}
+                  onClick={() => void confirmAndStart()}
+                >
+                  {planBusy === 'start' ? '启动中…' : '确认并启动'}
+                </button>
+              </div>
+            ) : null}
           </div>
+
+          {!detail.plan ? (
+            <form className="plan-form" onSubmit={(event) => void submitProposal(event)}>
+              <label className="field wide">
+                <span>计划正文（Markdown）</span>
+                <textarea
+                  className="system-prompt-input"
+                  rows={8}
+                  value={planContent}
+                  onChange={(event) => {
+                    setPlanContent(event.target.value)
+                    if (planNotice) setPlanNotice('')
+                  }}
+                  placeholder="描述任务目标、背景与验收标准。默认取自创建任务时填写的需求描述。"
+                />
+              </label>
+
+              <div className="plan-steps-editor">
+                {planSteps.map((item, index) => (
+                  <div className="plan-step-row" key={index} data-testid={`plan-step-${index + 1}`}>
+                    <div className="plan-step-index">{index + 1}</div>
+                    <div className="plan-step-fields">
+                      <input
+                        value={item.title}
+                        placeholder="步骤标题，例如：定位并修复缺陷"
+                        aria-label={`第 ${index + 1} 步标题`}
+                        onChange={(event) => updateStepDraft(index, { title: event.target.value })}
+                      />
+                      <textarea
+                        rows={2}
+                        value={item.body}
+                        placeholder="步骤说明（可选）"
+                        aria-label={`第 ${index + 1} 步说明`}
+                        onChange={(event) => updateStepDraft(index, { body: event.target.value })}
+                      />
+                      <input
+                        className="plan-step-agent"
+                        value={item.agentRef}
+                        placeholder="agentRef，默认 a1"
+                        aria-label={`第 ${index + 1} 步 agentRef`}
+                        onChange={(event) => updateStepDraft(index, { agentRef: event.target.value })}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="button ghost small"
+                      disabled={planSteps.length <= 1}
+                      onClick={() => removeStepDraft(index)}
+                    >
+                      删除
+                    </button>
+                  </div>
+                ))}
+                <button type="button" className="button ghost" onClick={addStepDraft}>
+                  添加步骤
+                </button>
+              </div>
+
+              {planNotice ? (
+                <p role="alert" className="notice danger">
+                  {planNotice}
+                </p>
+              ) : null}
+
+              <div className="form-actions">
+                <button type="submit" className="button primary" disabled={planBusy !== null}>
+                  {planBusy === 'submit' ? '提交中…' : '提交计划'}
+                </button>
+              </div>
+            </form>
+          ) : null}
 
           <ol className="step-list">
             {steps.map((step) => (
@@ -355,12 +608,27 @@ export default function IssueCockpit({
               <div className="empty-inline">暂无事件</div>
             ) : (
               <ul className="timeline-list" aria-label="执行时间线">
-                {events.map((event) => (
-                  <li key={event.eventId} className="timeline-item" data-testid={`event-${event.seq}`}>
-                    <span className="seq">#{event.seq}</span>
-                    <span className="kind">{event.kind}</span>
-                  </li>
-                ))}
+                {events.map((event) => {
+                  const payloadText = eventPayloadText(event.payload)
+                  const prUrl = eventPrUrl(event.payload)
+                  return (
+                    <li key={event.eventId} className="timeline-item" data-testid={`event-${event.seq}`}>
+                      <span className="seq">#{event.seq}</span>
+                      <span className="kind">{event.kind}</span>
+                      {payloadText ? <code className="timeline-payload">{payloadText}</code> : null}
+                      {prUrl ? (
+                        <a
+                          className="timeline-pr"
+                          href={prUrl}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                        >
+                          查看 PR
+                        </a>
+                      ) : null}
+                    </li>
+                  )
+                })}
               </ul>
             )}
           </section>

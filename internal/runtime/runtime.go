@@ -16,6 +16,18 @@ type DispatchRequest struct {
 	LeaseEpoch uint64
 	Branch     string
 	Prompt     string
+	// WorkDir 是 Agent 在机器上的工作目录（绝对路径）。
+	WorkDir string
+	// RepoURL 是任务绑定的仓库地址，可为空。
+	RepoURL string
+	// RepoDefaultBranch 是仓库默认分支，如 main。
+	RepoDefaultBranch string
+	// SystemPrompt 是 Agent 的系统提示词。
+	SystemPrompt string
+	// TaskTitle 是任务名称。
+	TaskTitle string
+	// StepTitle 是当前步骤标题。
+	StepTitle string
 }
 
 // ExecutionState 是执行快照状态。

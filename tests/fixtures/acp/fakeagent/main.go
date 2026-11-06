@@ -95,6 +95,11 @@ func main() {
 		case "session/load":
 			result(msg.ID, map[string]any{})
 		case "session/prompt":
+			if mode == "write_file" {
+				if dir, err := os.Getwd(); err == nil {
+					_ = os.WriteFile(dir+"/agent-output.txt", []byte("hello from fake agent\n"), 0o600)
+				}
+			}
 			switch mode {
 			case "hang":
 				continue // 不回复，等待取消或被杀

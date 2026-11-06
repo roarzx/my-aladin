@@ -97,13 +97,19 @@ func (h *Hub) Dispatch(ctx context.Context, req runtime.DispatchRequest) (string
 	}
 
 	params, err := json.Marshal(map[string]any{
-		"execution_id": req.ExecutionID,
-		"task_id":      req.TaskID,
-		"step_id":      req.StepID,
-		"attempt_no":   req.AttemptNo,
-		"lease_epoch":  req.LeaseEpoch,
-		"branch":       req.Branch,
-		"prompt":       req.Prompt,
+		"execution_id":        req.ExecutionID,
+		"task_id":             req.TaskID,
+		"step_id":             req.StepID,
+		"attempt_no":          req.AttemptNo,
+		"lease_epoch":         req.LeaseEpoch,
+		"branch":              req.Branch,
+		"prompt":              req.Prompt,
+		"work_dir":            req.WorkDir,
+		"repo_url":            req.RepoURL,
+		"repo_default_branch": req.RepoDefaultBranch,
+		"system_prompt":       req.SystemPrompt,
+		"task_title":          req.TaskTitle,
+		"step_title":          req.StepTitle,
 	})
 	if err != nil {
 		return "", err

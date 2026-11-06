@@ -204,15 +204,17 @@ func validateRepositories(ctx context.Context, ex mysqlstore.Executor, workspace
 	if len(repos) == 0 {
 		return nil
 	}
-	var count int
-	err := ex.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM repositories WHERE workspace_id = ? AND id = ?`,
-		workspaceID, repos[0]).Scan(&count)
-	if err != nil {
-		return errcode.New(errcode.UpstreamUnavailable, "校验仓库失败")
-	}
-	if count == 0 {
-		return errcode.Newf(errcode.ValidationFailed, "仓库不存在或不属于该工作区: %s", repos[0])
+	for _, repoID := range repos {
+		var count int
+		err := ex.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM repositories WHERE workspace_id = ? AND id = ?`,
+			workspaceID, repoID).Scan(&count)
+		if err != nil {
+			return errcode.New(errcode.UpstreamUnavailable, "校验仓库失败")
+		}
+		if count == 0 {
+			return errcode.Newf(errcode.ValidationFailed, "仓库不存在或不属于该工作区: %s", repoID)
+		}
 	}
 	return nil
 }

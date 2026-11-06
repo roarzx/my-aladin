@@ -191,6 +191,17 @@ func run(cfgPath string) error {
 		MaxMessageBytes:   cfg.ACP.MaxMessageBytes,
 	}, slog.Default())
 	wsServer.Handler = hub.Handler
+	// 守护进程连接/断开时同步机器在线状态（B6）。
+	wsServer.OnConnect = func(ctx context.Context, machineID string) {
+		if err := mysqlstore.HeartbeatMachine(ctx, db, machineID); err != nil {
+			slog.Warn("机器上线状态写入失败", "machine", machineID, "err", err)
+		}
+	}
+	wsServer.OnDisconnect = func(ctx context.Context, machineID string) {
+		if err := mysqlstore.MarkMachineOffline(ctx, db, machineID); err != nil {
+			slog.Warn("机器离线状态写入失败", "machine", machineID, "err", err)
+		}
+	}
 
 	router := httpapi.New(httpapi.Deps{
 		Authenticator: authenticator,
@@ -212,6 +223,9 @@ func run(cfgPath string) error {
 			})
 		},
 		RegisterGlobal: func(r chi.Router) {
+			(&httpapi.ControlPlane{
+				DB: db, Members: &mysqlstore.WorkspaceStore{DB: db},
+			}).Mount(r)
 			r.Get("/issues", taskHandler.List)
 			r.Get("/issues/{id}", taskHandler.Get)
 			r.Get("/issues/{id}/plans/{rev}", planHandler.Get)

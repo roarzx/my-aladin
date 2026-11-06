@@ -39,6 +39,8 @@ agent:
     bin: ""
     expected_version: "0.94.0"
     input_timeout_seconds: 1800
+    # 受信任工作区自动批准工具体权限；生产环境请按安全策略开启
+    auto_approve: true
 
 acp:
   initialize_timeout: 3s

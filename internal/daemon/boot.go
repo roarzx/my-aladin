@@ -74,11 +74,12 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	running := NewRunningExecutions()
 	providerConfig := acp.Config{
-		Bin:               agentRuntime.Bin,
-		ExpectedVersion:   agentRuntime.ExpectedVersion,
-		Cwd:               profile.Dir,
-		InitializeTimeout: cfg.ACP.InitializeTimeout.Std(),
-		InputTimeout:      time.Duration(agentRuntime.InputTimeoutSeconds) * time.Second,
+		Bin:                    agentRuntime.Bin,
+		ExpectedVersion:        agentRuntime.ExpectedVersion,
+		Cwd:                    profile.Dir,
+		InitializeTimeout:      cfg.ACP.InitializeTimeout.Std(),
+		InputTimeout:           time.Duration(agentRuntime.InputTimeoutSeconds) * time.Second,
+		AutoApprovePermissions: agentRuntime.AutoApprove,
 	}
 	stepHandler := &StepHandler{
 		ProviderConfig: providerConfig,

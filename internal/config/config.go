@@ -107,6 +107,8 @@ type AgentRuntimeConfig struct {
 	Bin                 string `yaml:"bin"`
 	ExpectedVersion     string `yaml:"expected_version"`
 	InputTimeoutSeconds int    `yaml:"input_timeout_seconds"`
+	// AutoApprove 允许 daemon 自动批准 Agent 的工具权限请求（受信任工作区）。
+	AutoApprove bool `yaml:"auto_approve"`
 }
 
 type ACPConfig struct {

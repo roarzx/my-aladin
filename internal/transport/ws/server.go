@@ -74,7 +74,16 @@ type Server struct {
 	// Handler 在握手成功后运行；machineID 来自升级前的鉴权结果。
 	// 为 nil 时只维持连接与心跳。
 	Handler func(ctx context.Context, machineID string, c *Conn) error
+
+	// OnConnect 在握手成功后调用（此时机器应被置为在线）。
+	OnConnect func(ctx context.Context, machineID string)
+	// OnDisconnect 在连接结束后调用（此时机器应被置为离线）。
+	OnDisconnect func(ctx context.Context, machineID string)
 }
+
+// callbackTimeout 限制连接状态回调的数据库操作耗时，
+// 避免慢查询把连接收尾拖住。
+const callbackTimeout = 5 * time.Second
 
 // NewServer 构造 WS 服务端。
 func NewServer(auth MachineAuthenticator, cfg Config, logger *slog.Logger) *Server {
@@ -141,6 +150,15 @@ func (s *Server) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.OnConnect != nil {
+		s.notify(r.Context(), s.OnConnect, machineID)
+	}
+	defer func() {
+		if s.OnDisconnect != nil {
+			s.notify(r.Context(), s.OnDisconnect, machineID)
+		}
+	}()
+
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	go s.heartbeatLoop(ctx, conn)
@@ -152,6 +170,14 @@ func (s *Server) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = conn.Keepalive(ctx)
+}
+
+// notify 在脱离请求取消的上下文里执行连接状态回调。
+// 连接结束后 r.Context() 可能已被取消，直接使用会导致数据库写入被跳过。
+func (s *Server) notify(ctx context.Context, fn func(context.Context, string), machineID string) {
+	cbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), callbackTimeout)
+	defer cancel()
+	fn(cbCtx, machineID)
 }
 
 func (s *Server) heartbeatLoop(ctx context.Context, c *Conn) {

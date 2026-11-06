@@ -1,5 +1,15 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 
+import {
+  createAgent,
+  fetchAgents,
+  fetchMachines,
+  fetchWorkspaces,
+  updateAgent,
+  type Agent,
+  type Machine,
+} from '../api/controlplane'
+import { ApiError } from '../api/issues'
 import AppShell from '../components/AppShell'
 import { IconPlus, IconRefresh, IconSearch } from '../components/icons'
 import { EmptyState, StateTag, toast } from '../components/ui'
@@ -8,119 +18,129 @@ import '../styles/pages-resources.css'
 
 /* ------------------------------------------------------------------
    Agent 管理 /agents
-   对照 hercules-frontend AgentsPage：panel-head 工具栏 + agent-board
-   卡片列表；创建弹层按「新增 Agent」原字段还原。
-   本地后端尚未提供 Agent 接口，列表恒为空，不伪造数据。
+   真实数据：GET /workspaces → GET /agents?workspaceId= 与 /machines?workspaceId=；
+   创建 / 编辑调用 POST /agents、PATCH /agents/{id}。
    ------------------------------------------------------------------ */
 
-interface AgentRow {
-  id: string
-  name: string
-  type: string
-  machineName: string
-  model: string
-  status: 'idle' | 'running' | 'offline'
-  lastActive: string
-  shared: boolean
-}
-
-/** 本地后端尚未提供 Agent 能力，接口接入前列表恒为空。 */
-const AGENTS: AgentRow[] = []
-
-const AGENT_STATUS: Record<AgentRow['status'], { label: string; tone: string }> = {
-  idle: { label: '空闲', tone: 'done' },
-  running: { label: '运行中', tone: 'running' },
+const MACHINE_STATUS: Record<string, { label: string; tone: string }> = {
+  online: { label: '在线', tone: 'done' },
+  busy: { label: '忙碌', tone: 'running' },
   offline: { label: '离线', tone: 'muted' },
 }
 
-type AgentType = 'claude_code' | 'codex' | 'kimi' | 'custom'
+function machineStatusMeta(status: string): { label: string; tone: string } {
+  return MACHINE_STATUS[status] ?? { label: status || '未知', tone: 'muted' }
+}
 
-const AGENT_TYPES: Array<{ label: string; value: AgentType }> = [
-  { label: 'Claude Code', value: 'claude_code' },
-  { label: 'Codex', value: 'codex' },
-  { label: 'Kimi Code', value: 'kimi' },
-  { label: '自定义', value: 'custom' },
-]
+function isAbsolutePath(value: string): boolean {
+  return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value)
+}
 
-type ProxySource = '' | 'proxy' | 'custom'
-
-const PROXY_SOURCES: Array<{ label: string; value: Exclude<ProxySource, ''> }> = [
-  { label: '模型代理站点', value: 'proxy' },
-  { label: '自定义', value: 'custom' },
-]
-
-type ProxyNode = '' | 'cn' | 'us'
-
-const PROXY_NODES: Array<{ label: string; value: Exclude<ProxyNode, ''> }> = [
-  { label: '国内 (CN)', value: 'cn' },
-  { label: '海外 (US)', value: 'us' },
-]
-
-function AgentCard({ agent }: { agent: AgentRow }) {
-  const meta = AGENT_STATUS[agent.status]
+function AgentCard({ agent, machine }: { agent: Agent; machine?: Machine }) {
+  const meta = machine ? machineStatusMeta(machine.status) : { label: '未绑定', tone: 'muted' }
   return (
-    <Link className={`agent-card ${agent.status}`} to={`/agent-detail?id=${encodeURIComponent(agent.id)}`}>
+    <Link
+      className={`agent-card ${agent.enabled ? 'idle' : 'offline'}`}
+      to={`/agent-detail?id=${encodeURIComponent(agent.id)}`}
+    >
       <div className="agent-card-head">
         <strong>
-          {agent.name || agent.type}
-          {agent.shared ? <em className="shared-badge">共享</em> : null}
+          {agent.name}
+          {agent.visibility === 'shared' ? <em className="shared-badge">共享</em> : null}
         </strong>
-        <StateTag tone={meta.tone}>{meta.label}</StateTag>
+        <StateTag tone={agent.enabled ? 'done' : 'muted'}>{agent.enabled ? '已启用' : '已停用'}</StateTag>
       </div>
-      <p>绑定机器：{agent.machineName || '未绑定机器'}</p>
+      <p>
+        绑定机器：{machine ? `${machine.name}（${meta.label}）` : '未绑定可用机器'}
+      </p>
+      <p>工作目录：{agent.workDir || '暂无数据'}</p>
       <p>模型：{agent.model || '跟随 Agent 默认 Model'}</p>
       <div className="machine-foot">
-        <span>最近活跃：{agent.lastActive || '暂无数据'}</span>
+        <span>{agent.visibility === 'shared' ? '共享' : '私有'}</span>
         <span>详情</span>
       </div>
     </Link>
   )
 }
 
-export function CreateAgentModal({ onClose }: { onClose: () => void }) {
-  const [name, setName] = useState('')
-  const [agentType, setAgentType] = useState<AgentType>('claude_code')
-  const [model, setModel] = useState('')
-  const [proxySource, setProxySource] = useState<ProxySource>('')
-  const [proxyNode, setProxyNode] = useState<ProxyNode>('')
-  const [proxyKey, setProxyKey] = useState('')
-  const [customKey, setCustomKey] = useState('')
-  const [baseUrl, setBaseUrl] = useState('')
+export function AgentFormModal({
+  workspaceId,
+  machines,
+  agent,
+  defaultMachineId,
+  onClose,
+  onSaved,
+}: {
+  workspaceId: string
+  machines: Machine[]
+  agent: Agent | null
+  defaultMachineId?: string
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const editing = Boolean(agent)
+  const [name, setName] = useState(agent?.name ?? '')
+  const [machineId, setMachineId] = useState(agent?.machineId ?? defaultMachineId ?? '')
+  const [workDir, setWorkDir] = useState(agent?.workDir ?? '')
+  const [systemPrompt, setSystemPrompt] = useState(agent?.systemPrompt ?? '')
+  const [model, setModel] = useState(agent?.model ?? '')
+  const [visibility, setVisibility] = useState(agent?.visibility === 'shared' ? 'shared' : 'private')
+  const [enabled, setEnabled] = useState(agent?.enabled ?? true)
   const [notice, setNotice] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault()
-    const trimmed = name.trim()
-    if (!trimmed) {
+    const trimmedName = name.trim()
+    if (!trimmedName) {
       setNotice('请输入 Agent 名称。')
       return
     }
-    if (trimmed.length > 64) {
+    if (trimmedName.length > 64) {
       setNotice('Agent 名称不能超过64个字符。')
       return
     }
-    if (!agentType) {
-      setNotice('请选择 Agent 类型。')
+    if (!machineId) {
+      setNotice('请选择要绑定的机器。')
       return
     }
-    if (proxySource && !proxyNode) {
-      setNotice('请选择模型代理节点。')
+    const trimmedDir = workDir.trim()
+    if (!trimmedDir) {
+      setNotice('请输入工作目录。')
       return
     }
-    if (proxySource === 'proxy' && !proxyKey.trim()) {
-      setNotice('请输入模型代理 key。')
+    if (!isAbsolutePath(trimmedDir)) {
+      setNotice('工作目录必须是绝对路径，例如 /home/user/project。')
       return
     }
-    if (proxySource === 'custom' && !customKey.trim()) {
-      setNotice('请输入自定义 API Key。')
-      return
+
+    const body = {
+      name: trimmedName,
+      machineId,
+      workDir: trimmedDir,
+      systemPrompt: systemPrompt.trim(),
+      visibility,
+      model: model.trim(),
+      enabled,
     }
-    if (proxySource === 'custom' && !baseUrl.trim()) {
-      setNotice('请输入自定义 Base URL。')
-      return
+
+    setSubmitting(true)
+    setNotice('')
+    try {
+      if (agent) {
+        await updateAgent(agent.id, body)
+        toast(`已更新 Agent：${trimmedName}`)
+      } else {
+        await createAgent({ workspaceId, ...body })
+        toast(`已创建 Agent：${trimmedName}`)
+      }
+      onSaved()
+      onClose()
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : String(err))
+    } finally {
+      setSubmitting(false)
     }
-    setNotice('本地后端尚未提供该能力，创建 Agent 不会写入数据库。')
-    toast(`本地后端尚未提供该能力，未能创建 Agent：${trimmed}。`)
   }
 
   return (
@@ -131,10 +151,16 @@ export function CreateAgentModal({ onClose }: { onClose: () => void }) {
         if (event.target === event.currentTarget) onClose()
       }}
     >
-      <div className="modal" role="dialog" aria-modal="true" aria-label="新增 Agent" style={{ width: 'min(760px, 100%)' }}>
-        <form onSubmit={submit}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={editing ? '编辑 Agent' : '创建 Agent'}
+        style={{ width: 'min(760px, 100%)' }}
+      >
+        <form onSubmit={(event) => void submit(event)}>
           <div className="modal-head">
-            <h3>新增 Agent</h3>
+            <h3>{editing ? '编辑 Agent' : '创建 Agent'}</h3>
             <button type="button" className="button ghost small" onClick={onClose}>
               关闭
             </button>
@@ -142,7 +168,7 @@ export function CreateAgentModal({ onClose }: { onClose: () => void }) {
           <div className="modal-body">
             <div className="resource-modal-form">
               <p className="resource-page-note">
-                创建 Agent 配置时可绑定到指定机器，系统将同时创建 Agent 实例。模型代理配置用于让 Agent 通过模型代理站点访问大模型。
+                Agent 绑定一台已上线机器的工作目录，daemon 在该目录下启动 Claude Code 执行任务步骤。
               </p>
 
               <section className="resource-section">
@@ -160,24 +186,50 @@ export function CreateAgentModal({ onClose }: { onClose: () => void }) {
                   </label>
 
                   <label className="field">
-                    <span>Agent 类型</span>
-                    <select value={agentType} onChange={(event) => setAgentType(event.target.value as AgentType)}>
-                      {AGENT_TYPES.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
+                    <span>绑定机器</span>
+                    <select value={machineId} onChange={(event) => setMachineId(event.target.value)}>
+                      <option value="">{machines.length ? '请选择机器' : '暂无可用机器'}</option>
+                      {machines.map((machine) => (
+                        <option key={machine.id} value={machine.id}>
+                          {machine.name} · {machineStatusMeta(machine.status).label}
                         </option>
                       ))}
                     </select>
+                    <small className="field-help">
+                      {machines.length ? '建议选择「在线」的机器。' : '请先在机器管理页注册并启动 daemon。'}
+                    </small>
+                  </label>
+
+                  <label className="field wide">
+                    <span>工作目录</span>
+                    <input
+                      value={workDir}
+                      placeholder="/home/user/project"
+                      onChange={(event) => setWorkDir(event.target.value)}
+                    />
+                    <small className="field-help">机器上的绝对路径，Agent 在该目录下执行任务。</small>
                   </label>
 
                   <label className="field">
                     <span>使用范围</span>
                     <div className="agent-usage-scope-options" role="radiogroup" aria-label="使用范围">
                       <label>
-                        <input type="radio" name="usage-scope" defaultChecked /> 私有
+                        <input
+                          type="radio"
+                          name="usage-scope"
+                          checked={visibility === 'private'}
+                          onChange={() => setVisibility('private')}
+                        />{' '}
+                        私有
                       </label>
                       <label>
-                        <input type="radio" name="usage-scope" /> 共享
+                        <input
+                          type="radio"
+                          name="usage-scope"
+                          checked={visibility === 'shared'}
+                          onChange={() => setVisibility('shared')}
+                        />{' '}
+                        共享
                       </label>
                     </div>
                     <small className="field-help">私有 Agent 仅自己可见；共享后小队成员也可使用。</small>
@@ -194,88 +246,37 @@ export function CreateAgentModal({ onClose }: { onClose: () => void }) {
                     </div>
                     <small className="field-help">留空时使用 Agent 启动时的默认 Model。</small>
                   </label>
+
+                  <label className="field">
+                    <span>启用状态</span>
+                    <div className="agent-usage-scope-options">
+                      <label>
+                        <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />{' '}
+                        启用该 Agent
+                      </label>
+                    </div>
+                    <small className="field-help">停用后该 Agent 不会参与任务调度。</small>
+                  </label>
                 </div>
               </section>
 
               <section className="resource-section">
-                <h4 className="resource-section-title">模型代理配置</h4>
-                <div className="agent-proxy-config-panel">
-                  <div className="agent-proxy-config-row">
-                    <label className="field">
-                      <span>模型代理来源</span>
-                      <select
-                        value={proxySource}
-                        onChange={(event) => {
-                          setProxySource(event.target.value as ProxySource)
-                          setProxyNode('')
-                        }}
-                      >
-                        <option value="">未配置</option>
-                        {PROXY_SOURCES.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    {proxySource ? (
-                      <label className="field">
-                        <span>模型代理节点</span>
-                        <select value={proxyNode} onChange={(event) => setProxyNode(event.target.value as ProxyNode)}>
-                          <option value="">请选择模型代理节点</option>
-                          {PROXY_NODES.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ) : null}
-                  </div>
-
-                  {proxySource === 'proxy' ? (
-                    <label className="field">
-                      <span>模型代理 key</span>
-                      <input
-                        value={proxyKey}
-                        placeholder="请输入模型代理 key"
-                        onChange={(event) => setProxyKey(event.target.value)}
-                      />
-                      <small className="field-help">选择节点后填写该节点下可用的 key。</small>
-                    </label>
-                  ) : null}
-
-                  {proxySource === 'custom' ? (
-                    <div className="agent-proxy-config-row">
-                      <label className="field">
-                        <span>自定义 API Key</span>
-                        <input
-                          type="password"
-                          value={customKey}
-                          placeholder="请输入自定义 API Key"
-                          onChange={(event) => setCustomKey(event.target.value)}
-                        />
-                      </label>
-                      <label className="field">
-                        <span>自定义 Base URL</span>
-                        <input
-                          value={baseUrl}
-                          placeholder="请输入自定义 Base URL"
-                          onChange={(event) => setBaseUrl(event.target.value)}
-                        />
-                      </label>
-                    </div>
-                  ) : null}
-
-                  <small className="field-help">
-                    来源选「未配置」时使用平台默认模型网关；该配置仅在本机保存前展示，本地后端尚未提供写入能力。
-                  </small>
-                </div>
+                <h4 className="resource-section-title">System Prompt</h4>
+                <label className="field wide">
+                  <span>System Prompt</span>
+                  <textarea
+                    className="system-prompt-input"
+                    rows={6}
+                    value={systemPrompt}
+                    placeholder="填写该 Agent 的系统提示词，例如项目约定、代码风格与禁止事项。"
+                    onChange={(event) => setSystemPrompt(event.target.value)}
+                  />
+                  <small className="field-help">留空时使用平台默认提示词。</small>
+                </label>
               </section>
 
               {notice ? (
-                <p className="notice warn" role="status">
+                <p className="notice danger" role="alert">
                   {notice}
                 </p>
               ) : null}
@@ -285,8 +286,8 @@ export function CreateAgentModal({ onClose }: { onClose: () => void }) {
             <button type="button" className="button subtle" onClick={onClose}>
               取消
             </button>
-            <button type="submit" className="button primary">
-              确认创建
+            <button type="submit" className="button primary" disabled={submitting}>
+              {submitting ? '保存中…' : editing ? '保存修改' : '确认创建'}
             </button>
           </div>
         </form>
@@ -296,23 +297,66 @@ export function CreateAgentModal({ onClose }: { onClose: () => void }) {
 }
 
 export default function Agents() {
+  const [workspaceId, setWorkspaceId] = useState('')
+  const [agents, setAgents] = useState<Agent[]>([])
+  const [machines, setMachines] = useState<Machine[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [keyword, setKeyword] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
 
+  const load = useCallback(async () => {
+    setError('')
+    try {
+      let wid = workspaceId
+      if (!wid) {
+        const workspaces = await fetchWorkspaces()
+        if (workspaces.length === 0) {
+          setAgents([])
+          setMachines([])
+          setLoading(false)
+          return
+        }
+        wid = workspaces[0].id
+        setWorkspaceId(wid)
+      }
+      const [agentList, machineList] = await Promise.all([fetchAgents(wid), fetchMachines(wid)])
+      setAgents(agentList)
+      setMachines(machineList)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }, [workspaceId])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const machineName = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const machine of machines) map.set(machine.id, machine.name)
+    return map
+  }, [machines])
+
   const filtered = useMemo(() => {
     const query = keyword.trim().toLowerCase()
-    if (!query) return AGENTS
-    return AGENTS.filter((agent) =>
-      [agent.name, agent.type, agent.machineName, agent.model].join(' ').toLowerCase().includes(query),
+    if (!query) return agents
+    return agents.filter((agent) =>
+      [agent.name, agent.workDir, agent.model, machineName.get(agent.machineId) ?? '']
+        .join(' ')
+        .toLowerCase()
+        .includes(query),
     )
-  }, [keyword])
+  }, [agents, keyword, machineName])
 
   return (
     <AppShell
       title="Agent 运行控制"
       breadcrumb="Agent 管理"
       actions={
-        <button type="button" className="button ghost" onClick={() => toast('本地后端尚未提供该能力，无法刷新 Agent 列表。')}>
+        <button type="button" className="button ghost" onClick={() => void load()}>
           <IconRefresh width={15} height={15} /> 刷新
         </button>
       }
@@ -333,26 +377,43 @@ export default function Agents() {
                 onChange={(event) => setKeyword(event.target.value)}
               />
             </label>
-            <button type="button" className="button primary" onClick={() => setCreateOpen(true)}>
+            <button
+              type="button"
+              className="button primary"
+              onClick={() => setCreateOpen(true)}
+              disabled={!workspaceId}
+            >
               <IconPlus width={15} height={15} /> 创建 Agent
             </button>
           </div>
         </div>
 
-        {filtered.length ? (
+        {error ? (
+          <p className="notice danger" role="alert">
+            加载失败:{error}
+          </p>
+        ) : null}
+
+        {loading ? (
+          <div className="empty-inline">加载中…</div>
+        ) : filtered.length ? (
           <div className="agent-board">
             {filtered.map((agent) => (
-              <AgentCard key={agent.id} agent={agent} />
+              <AgentCard
+                key={agent.id}
+                agent={agent}
+                machine={machines.find((item) => item.id === agent.machineId)}
+              />
             ))}
           </div>
         ) : (
           <div className="empty-inline">
             <EmptyState
-              title={keyword.trim() ? '没有匹配的 Agent' : '当前用户暂无 Agent 或未绑定配置'}
+              title={keyword.trim() ? '没有匹配的 Agent' : '当前用户暂无 Agent'}
               description={
                 keyword.trim()
                   ? '没有找到符合搜索条件的 Agent，请调整关键词后重试。'
-                  : '本地后端尚未提供该能力。页面结构按阿拉丁设计还原，接入 Agent 接口后即可展示配置与运行状态。'
+                  : '创建 Agent 并绑定已上线的机器后，即可在创建任务时选择它执行步骤。'
               }
               action={
                 keyword.trim() ? (
@@ -360,7 +421,12 @@ export default function Agents() {
                     清空搜索
                   </button>
                 ) : (
-                  <button type="button" className="button ghost" onClick={() => setCreateOpen(true)}>
+                  <button
+                    type="button"
+                    className="button ghost"
+                    onClick={() => setCreateOpen(true)}
+                    disabled={!workspaceId}
+                  >
                     创建 Agent
                   </button>
                 )
@@ -370,7 +436,15 @@ export default function Agents() {
         )}
       </section>
 
-      {createOpen ? <CreateAgentModal onClose={() => setCreateOpen(false)} /> : null}
+      {createOpen ? (
+        <AgentFormModal
+          workspaceId={workspaceId}
+          machines={machines}
+          agent={null}
+          onClose={() => setCreateOpen(false)}
+          onSaved={() => void load()}
+        />
+      ) : null}
     </AppShell>
   )
 }
