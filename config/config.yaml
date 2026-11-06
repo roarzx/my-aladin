@@ -30,14 +30,17 @@ security:
   admin_user_id: 1
 
 daemon:
-  acp_url: "${ALADDIN_ACP_URL}"
-  api_url: "${ALADDIN_API_URL}"
+  # 本地默认；部署时可用 ALADDIN_ACP_URL / ALADDIN_API_URL 环境变量覆盖
+  acp_url: "ws://127.0.0.1:8080/v1/acp"
+  api_url: "http://127.0.0.1:8080"
   profile_dir: "~/.aladdin/profiles"
 
 agent:
   claude:
-    bin: ""
-    expected_version: "0.94.0"
+    # 安装：npm i -g @agentclientprotocol/claude-agent-acp
+    # 与 `claude-agent-acp --version` 保持一致
+    bin: "claude-agent-acp"
+    expected_version: "0.101.0"
     input_timeout_seconds: 1800
     # 受信任工作区自动批准工具体权限；生产环境请按安全策略开启
     auto_approve: true

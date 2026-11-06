@@ -38,8 +38,11 @@ function formatTime(value: string | null): string {
 /** 机器注册成功后的 daemon 启动命令（密钥只返回一次明文）。 */
 export function daemonCommand(machine: Machine, token: string): string {
   return [
+    'make build',
+    '',
     `ALADDIN_MACHINE_TOKEN=${token} \\`,
-    'make build && \\',
+    'ALADDIN_ACP_URL=ws://127.0.0.1:8080/v1/acp \\',
+    'ALADDIN_API_URL=http://127.0.0.1:8080 \\',
     './bin/daemon --config config/config.yaml --profile default \\',
     `  --machine-id ${machine.id}`,
   ].join('\n')
