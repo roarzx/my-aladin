@@ -642,7 +642,8 @@ func (h *ControlPlane) createRepository(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") &&
-		!strings.HasPrefix(url, "git@") && !strings.HasPrefix(url, "ssh://") {
+		!strings.HasPrefix(url, "git@") && !strings.HasPrefix(url, "ssh://") &&
+		!strings.HasPrefix(url, "file://") {
 		Fail(w, errcode.New(errcode.ValidationFailed, "仓库地址必须是 git 可访问的 URL"))
 		return
 	}

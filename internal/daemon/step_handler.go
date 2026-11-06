@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -208,7 +209,11 @@ func (h *StepHandler) deliver(ctx context.Context, ws *Workspace, params stepPar
 
 	creator := h.PRCreator
 	if creator == nil {
-		creator = GHCreator{}
+		if os.Getenv("ALADDIN_PR_PROVIDER") == "local" {
+			creator = LocalPRCreator{}
+		} else {
+			creator = GHCreator{}
+		}
 	}
 	prURL, err := creator.EnsurePR(ctx, ws.Dir, PRRequest{
 		RepoURL: params.RepoURL,

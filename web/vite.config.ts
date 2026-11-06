@@ -1,5 +1,5 @@
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
 // 页面路由与 API 前缀重名（/machines、/agents）：浏览器直接访问时返回 SPA，
 // fetch/XHR 仍代理到后端。
@@ -33,5 +33,6 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    exclude: [...configDefaults.exclude, 'e2e/**'],
   },
 })

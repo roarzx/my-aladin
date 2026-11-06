@@ -119,3 +119,16 @@ func lastNonEmptyLine(s string) string {
 	}
 	return ""
 }
+
+// LocalPRCreator 是 CI/E2E 用的本地 PR 提供者：不访问 GitHub，
+// 返回可断言、不可点击的 local:// URL。
+type LocalPRCreator struct{}
+
+// EnsurePR 实现 PRCreator。
+func (LocalPRCreator) EnsurePR(_ context.Context, _ string, req PRRequest) (string, error) {
+	head := req.Head
+	if head == "" {
+		head = "detached"
+	}
+	return "local://pull/" + head, nil
+}

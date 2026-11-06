@@ -40,6 +40,7 @@ export REDIS_ADDR=127.0.0.1:6379 ALADDIN_ADMIN_TOKEN=devtoken
 make test              # 单测（不依赖外部服务）
 make verify            # Docker 依赖 + 迁移 + 集成测试 + 单测
 make test-e2e          # 普通/小队端到端（真实 MySQL/Redis）
+make test-ui-e2e       # Playwright UI E2E（机器/Agent/主路径）
 make perf-test         # 并发派发基线
 pnpm --dir web test    # 前端单测（前端由独立工作流维护）
 ```
@@ -78,6 +79,7 @@ CI：lint / unit / integration / web 四个 job，见 `.github/workflows/ci.yml`
 - [部署与迁移](deploy/README.md)
 - [性能基线](docs/perf-baseline.md)
 - [主路径验收证据](docs/evidence/MAIN-PATH/README.md)
+- [UI E2E 证据](docs/evidence/UI-E2E/README.md)
 - [验收证据索引](docs/evidence/README.md)
 - 架构决策：[ADR-0001 技术栈](docs/adr/0001-tech-stack.md)、
   [ADR-0002 存储分工](docs/adr/0002-storage-split.md)、

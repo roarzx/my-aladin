@@ -13,6 +13,10 @@ config/config.local.yaml
 
 # 前端
 node_modules/
+web/e2e/.e2e-repo*/
+web/e2e/.e2e-state.json
+web/playwright-report/
+web/test-results/
 *.tsbuildinfo
 web/dist/
 web/.vite/

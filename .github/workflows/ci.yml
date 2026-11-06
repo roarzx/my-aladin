@@ -109,3 +109,33 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm test
           pnpm run build
+
+  ui-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: 启动依赖
+        run: docker compose -f deploy/docker-compose.yml up -d --wait
+      - name: 迁移
+        run: go run ./cmd/aladdin migrate --dsn 'root:root@tcp(127.0.0.1:3306)/aladdin_test?parseTime=true&loc=UTC&charset=utf8mb4'
+      - name: 构建
+        run: make build
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+      - name: 安装 Chromium
+        run: pnpm --dir web exec playwright install --with-deps chromium
+      - name: UI E2E
+        run: pnpm --dir web test:e2e
+        env:
+          CI: 'true'

@@ -1,0 +1,10 @@
+daemon:
+  acp_url: "ws://127.0.0.1:8080/v1/acp"
+  api_url: "http://127.0.0.1:8080"
+  profile_dir: "/tmp/aladdin-playwright/profiles"
+agent:
+  claude:
+    bin: "${ALADDIN_FAKE_AGENT}"
+    expected_version: "0.100.0"
+    input_timeout_seconds: 120
+    auto_approve: true
