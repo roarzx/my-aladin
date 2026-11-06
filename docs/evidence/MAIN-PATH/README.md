@@ -25,16 +25,18 @@
 6. **最终状态**
    - Task `chatting`，Step `completed`，attempt `completed`
    - PR：https://github.com/roarzx/aladdin-demo/pull/1
+   - 演示仓库已设为 public（2026-11-06），PR 可匿名访问（HTTP 200）
 
 ## 证据
 
 - 事件流：`task.created → plan.submitted → step.dispatched → step.done`
   （`step.done` payload 含 `pr_url`、`commit_sha`）
-- 截图（本机）：
-  - `/tmp/aladdin-run/ui-mainpath-list.png`
-  - `/tmp/aladdin-run/ui-mainpath-machines.png`
-  - `/tmp/aladdin-run/ui-mainpath-agents.png`
-  - `/tmp/aladdin-run/ui-mainpath-pr.png`
+- 截图：
+  - `docs/evidence/MAIN-PATH/ui-task-list.png`
+  - `docs/evidence/MAIN-PATH/ui-machines.png`
+  - `docs/evidence/MAIN-PATH/ui-agents.png`
+  - `docs/evidence/MAIN-PATH/ui-cockpit-pr.png`
+  - `docs/evidence/MAIN-PATH/github-pr.png`
 - 仓库提交：`git log --oneline -1` → `7ef9b03 aladdin: Real Claude PR 演示`
 - PR 校验：`gh pr list --repo roarzx/aladdin-demo --head aladdin/2c3e723b`
 
