@@ -23,6 +23,7 @@ func runDaemon(args []string) error {
 	profileDir := fs.String("profile-dir", "", "profile 根目录（默认 ~/.aladdin/profiles）")
 	acpURL := fs.String("acp-url", "", "控制面 WS 地址（默认 ws://127.0.0.1:8080/v1/acp）")
 	apiURL := fs.String("api-url", "", "控制面 HTTP 地址（默认 http://127.0.0.1:8080）")
+	logFile := fs.String("log-file", "", "日志文件（默认 <profile>/daemon.log，\"-\" 表示只写 stderr）")
 	_ = fs.Parse(args[1:])
 
 	if *machineID == "" {
@@ -31,6 +32,7 @@ func runDaemon(args []string) error {
 	opts := daemon.Options{
 		Profile: *profile, ConfigPath: *configPath, MachineID: *machineID,
 		Token: *token, ACPURL: *acpURL, APIURL: *apiURL, ProfileDir: *profileDir,
+		LogFile: *logFile,
 	}
 	if opts.ConfigPath == "" {
 		// 不依赖配置文件；--acp-url/--api-url 可覆盖内置默认值

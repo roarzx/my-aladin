@@ -8,13 +8,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/roarzx/my-aladin/internal/buildinfo"
 	"github.com/roarzx/my-aladin/internal/config"
+	"github.com/roarzx/my-aladin/internal/observability"
 	"github.com/roarzx/my-aladin/internal/transport/acp"
 )
 
@@ -34,6 +37,33 @@ type Options struct {
 	ACPURL     string
 	APIURL     string
 	ProfileDir string
+	// LogFile 为日志文件路径；为空时默认写入 <profile>/daemon.log，"-" 表示只写 stderr。
+	LogFile string
+}
+
+// setupLogFile 配置进程日志输出：文件 + stderr 双写；path 为 "-" 时保持原样。
+func setupLogFile(path, profileDir string) error {
+	if path == "-" {
+		return nil
+	}
+	if path == "" {
+		path = filepath.Join(profileDir, "daemon.log")
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("打开日志文件 %s: %w", path, err)
+	}
+	level := slog.LevelInfo
+	switch strings.ToLower(os.Getenv("ALADDIN_LOG_LEVEL")) {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	}
+	slog.SetDefault(observability.NewLogger(io.MultiWriter(os.Stderr, file), level))
+	return nil
 }
 
 // DefaultConfig 返回无需配置文件即可启动 daemon 的默认配置。
@@ -75,6 +105,11 @@ func Run(ctx context.Context, opts Options) error {
 
 	profile, err := ResolveProfile(cfg.Daemon.ProfileDir, opts.Profile, opts.MachineID)
 	if err != nil {
+		return err
+	}
+
+	// 日志落盘：默认 <profile>/daemon.log，便于事后排查（此前只打到终端）。
+	if err := setupLogFile(opts.LogFile, profile.Dir); err != nil {
 		return err
 	}
 

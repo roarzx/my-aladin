@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/roarzx/my-aladin/internal/agentevent"
 	"github.com/roarzx/my-aladin/internal/transport/acp"
@@ -81,6 +82,10 @@ func (h *StepHandler) start(ctx context.Context, raw json.RawMessage) protocol.R
 	if !ok {
 		return rejected("no_channel", "连接不支持事件回传")
 	}
+	// 防御：派发参数缺 prompt 时拒绝执行，避免空跑后误报成功。
+	if strings.TrimSpace(params.Prompt) == "" {
+		return rejected("invalid_params", "任务提示词为空，拒绝执行")
+	}
 
 	go h.run(ctx, params, sender)
 	return protocol.ResponsePayload{Accepted: true}
@@ -137,23 +142,85 @@ func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender)
 
 	var seq atomic.Uint64
 	digest := sha256.New()
+	runStarted := time.Now()
+	// 工具调用元信息分散在同一 tool_call_id 的多次 update 里：首帧带 title/kind，
+	// 终帧只带 status，必须累积后再上报，否则审计记录里工具名是空的。
+	type toolState struct {
+		startedAt time.Time
+		title     string
+		kind      string
+	}
+	tools := make(map[string]*toolState)
+	emitWork := func(kind string, data map[string]any) {
+		data["step_id"] = params.StepID
+		data["attempt_no"] = params.AttemptNo
+		if err := sender.SendEvent("work_event", params.ExecutionID, params.AttemptNo, params.StepID,
+			map[string]any{"kind": kind, "data": data}); err != nil {
+			h.log().Warn("发送过程事件失败", "kind", kind, "err", err)
+		}
+	}
+	handleTool := func(event agentevent.Event) {
+		if event.ToolCallID == "" {
+			return
+		}
+		state := tools[event.ToolCallID]
+		if state == nil {
+			state = &toolState{startedAt: time.Now()}
+			tools[event.ToolCallID] = state
+		}
+		if event.Title != "" {
+			state.title = event.Title
+		}
+		if event.ToolKind != "" {
+			state.kind = event.ToolKind
+		}
+		status := strings.ToLower(strings.TrimSpace(event.Status))
+		if event.Kind == agentevent.KindToolCall && status != "completed" && status != "failed" {
+			return
+		}
+		if status != "completed" && status != "failed" {
+			return
+		}
+		delete(tools, event.ToolCallID)
+		emitWork("tool.call", map[string]any{
+			"tool_call_id": event.ToolCallID,
+			"title":        state.title,
+			"tool_kind":    state.kind,
+			"status":       status,
+			"duration_ms":  time.Since(state.startedAt).Milliseconds(),
+		})
+	}
+
 	result, err := session.Prompt(ctx, promptWithSystem(params), func(event agentevent.Event) {
-		if event.Kind != agentevent.KindStreamDelta && event.Kind != agentevent.KindThoughtDelta {
+		switch event.Kind {
+		case agentevent.KindToolCall, agentevent.KindToolUpdate:
+			handleTool(event)
+			return
+		case agentevent.KindNotice:
+			emitWork("agent.notice", map[string]any{"text": event.Text, "status": "info"})
+			return
+		case agentevent.KindStreamDelta, agentevent.KindThoughtDelta:
+			// 仅这两种进入流式输出
+		default:
 			return
 		}
 		if event.Kind == agentevent.KindStreamDelta {
 			_, _ = digest.Write([]byte(event.Text))
 		}
-		_ = sender.SendStream(params.ExecutionID, params.AttemptNo, params.StepID,
-			seq.Add(1), event.Text, false)
+		if err := sender.SendStream(params.ExecutionID, params.AttemptNo, params.StepID,
+			seq.Add(1), event.Text, false); err != nil {
+			h.log().Warn("发送流式内容失败", "err", err)
+		}
 	})
 	if err != nil {
 		h.fail(sender, params, string(errcode.Classify(err)), isUncertain(err), err)
 		return
 	}
 
-	_ = sender.SendStream(params.ExecutionID, params.AttemptNo, params.StepID,
-		seq.Add(1), "", true)
+	if err := sender.SendStream(params.ExecutionID, params.AttemptNo, params.StepID,
+		seq.Add(1), "", true); err != nil {
+		h.log().Warn("发送流式结束失败", "err", err)
+	}
 
 	summaryDigest := hex.EncodeToString(digest.Sum(nil))
 
@@ -167,13 +234,18 @@ func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender)
 				return
 			}
 		}
-		_ = sender.SendEvent("step_done", params.ExecutionID, params.AttemptNo, params.StepID, map[string]any{
+		if err := sender.SendEvent("step_done", params.ExecutionID, params.AttemptNo, params.StepID, map[string]any{
 			"attempt_no":     params.AttemptNo,
 			"summary_digest": summaryDigest,
 			"commit_sha":     commitSHA,
 			"branch":         params.Branch,
 			"pr_url":         prURL,
-		})
+			"input_tokens":   result.Usage.InputTokens,
+			"output_tokens":  result.Usage.OutputTokens,
+			"duration_ms":    time.Since(runStarted).Milliseconds(),
+		}); err != nil {
+			h.log().Warn("发送 step_done 失败", "err", err)
+		}
 	default:
 		h.fail(sender, params, "verification", false,
 			fmt.Errorf("prompt 以 %q 结束", result.StopReason))
@@ -289,12 +361,14 @@ func shortID(id string) string {
 
 func (h *StepHandler) fail(sender Sender, params stepParams, class string, uncertain bool, err error) {
 	h.log().Warn("步骤执行失败", "step", params.StepID, "err", err)
-	_ = sender.SendEvent("step_fail", params.ExecutionID, params.AttemptNo, params.StepID, map[string]any{
+	if sendErr := sender.SendEvent("step_fail", params.ExecutionID, params.AttemptNo, params.StepID, map[string]any{
 		"attempt_no":  params.AttemptNo,
 		"reason":      err.Error(),
 		"error_class": class,
 		"uncertain":   uncertain,
-	})
+	}); sendErr != nil {
+		h.log().Warn("发送 step_fail 失败", "err", sendErr)
+	}
 }
 
 func (h *StepHandler) log() *slog.Logger {

@@ -49,6 +49,13 @@ func (l *Lease) Acquire(ctx context.Context, attempt domain.Attempt) error {
 	return nil
 }
 
+
+// Release 主动释放租约（派发失败回滚时使用），失败不阻塞主流程。
+func (l *Lease) Release(ctx context.Context, attemptID string) error {
+	_, err := l.Store.Delete(ctx, attemptID)
+	return err
+}
+
 // Renew 续约；旧 epoch 的续约被拒绝。
 func (l *Lease) Renew(ctx context.Context, attemptID string, epoch uint64) error {
 	attempt, err := mysqlstore.GetAttemptByID(ctx, l.DB, attemptID)

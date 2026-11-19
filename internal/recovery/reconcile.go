@@ -94,9 +94,32 @@ func (r *Reconciler) apply(ctx context.Context, stepID string, verdict Verdict,
 		return nil
 	}
 	if verdict == VerdictCompleted {
+		// 对账期间计划/任务处于 paused；先恢复 executing，AdvancePlan 才能把
+		// 全终态的步骤收敛为 completed，否则任务会一直停在 paused。
+		r.resume(ctx, step.PlanID)
 		return r.Handlers.AdvancePlan(ctx, step.PlanID)
 	}
 	return r.Handlers.PausePlan(ctx, step.PlanID)
+}
+
+// resume 把因对账而暂停的计划与任务恢复为 executing（尽量而为）。
+func (r *Reconciler) resume(ctx context.Context, planID string) {
+	plan, _, err := mysqlstore.GetPlanByID(ctx, r.DB, planID)
+	if err != nil {
+		return
+	}
+	if plan.Status == domain.PlanPaused {
+		_, _ = mysqlstore.UpdatePlanState(ctx, r.DB, plan.ID,
+			domain.PlanPaused, domain.PlanExecuting, plan.Version)
+	}
+	task, err := mysqlstore.GetTask(ctx, r.DB, plan.TaskID)
+	if err != nil {
+		return
+	}
+	if task.Status == domain.TaskPaused {
+		_, _ = mysqlstore.UpdateTaskState(ctx, r.DB, task.ID,
+			domain.TaskPaused, domain.TaskExecuting, task.Version)
+	}
 }
 
 func (r *Reconciler) record(ctx context.Context, stepID, kind string, payload map[string]any) {

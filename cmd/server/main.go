@@ -28,6 +28,7 @@ import (
 	"github.com/roarzx/my-aladin/internal/health"
 	"github.com/roarzx/my-aladin/internal/httpapi"
 	"github.com/roarzx/my-aladin/internal/machine"
+	"github.com/roarzx/my-aladin/internal/observability"
 	"github.com/roarzx/my-aladin/internal/orchestration"
 	"github.com/roarzx/my-aladin/internal/plan"
 	"github.com/roarzx/my-aladin/internal/recovery"
@@ -41,6 +42,8 @@ import (
 )
 
 func main() {
+	// 统一 JSON 结构化日志（含脱敏与 ALADDIN_LOG_LEVEL 级别控制）。
+	slog.SetDefault(observability.Log())
 	var (
 		cfgPath    string
 		healthOnly bool
@@ -154,7 +157,7 @@ func run(cfgPath string) error {
 	}
 	planService := &plan.Service{DB: db}
 	retryService := &orchestration.RetryService{
-		DB: db, Runtime: hub, MaxAttempts: cfg.Scheduler.MaxAttemptsPerStep,
+		DB: db, Runtime: hub, MaxAttempts: cfg.Scheduler.MaxAttemptsPerStep, Lease: lease,
 	}
 	retryHandler := &orchestration.Handler{
 		DB: db, Members: &mysqlstore.WorkspaceStore{DB: db}, Service: retryService,

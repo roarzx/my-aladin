@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>贪吃蛇 · 阿拉丁</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #172033;
+    --line: #24324a;
+    --text: #e2e8f0;
+    --muted: #8b9bb4;
+    --blue: #3b82f6;
+    --blue-soft: #1d4ed8;
+    --green: #22c55e;
+    --amber: #f59e0b;
+    --red: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background:
+      radial-gradient(1200px 600px at 20% -10%, rgba(59,130,246,.18), transparent 60%),
+      radial-gradient(900px 500px at 110% 110%, rgba(34,197,94,.12), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font: 14px/1.5 Inter, "SF Pro Text", "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .game {
+    width: min(92vw, 520px);
+    display: grid;
+    gap: 14px;
+  }
+  .head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .title { display: grid; gap: 2px; }
+  .title h1 { margin: 0; font-size: 20px; letter-spacing: .2px; }
+  .title span { color: var(--muted); font-size: 12px; }
+  .scores { display: flex; gap: 10px; }
+  .score {
+    min-width: 84px;
+    padding: 7px 12px;
+    background: rgba(23, 32, 51, .9);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    text-align: right;
+  }
+  .score b { display: block; font-size: 20px; line-height: 26px; font-variant-numeric: tabular-nums; }
+  .score span { color: var(--muted); font-size: 11px; }
+  .board-wrap {
+    position: relative;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    overflow: hidden;
+    background: var(--panel);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, .35);
+  }
+  canvas { display: block; width: 100%; height: auto; touch-action: none; }
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: rgba(10, 16, 28, .62);
+    backdrop-filter: blur(3px);
+    transition: opacity .18s ease;
+  }
+  .overlay.hidden { opacity: 0; pointer-events: none; }
+  .card { text-align: center; display: grid; gap: 10px; justify-items: center; }
+  .card h2 { margin: 0; font-size: 22px; }
+  .card p { margin: 0; color: var(--muted); font-size: 13px; max-width: 300px; }
+  .btn {
+    margin-top: 6px;
+    padding: 10px 22px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--blue);
+    color: #fff;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 8px 20px rgba(37, 99, 235, .35);
+  }
+  .btn:hover { background: var(--blue-soft); }
+  .keys {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  kbd {
+    padding: 1px 6px;
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    background: rgba(15, 23, 42, .8);
+    color: var(--text);
+    font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (max-width: 480px) {
+    .title h1 { font-size: 17px; }
+    .score { min-width: 70px; padding: 6px 10px; }
+    .score b { font-size: 17px; }
+  }
+</style>
+</head>
+<body>
+<main class="game">
+  <header class="head">
+    <div class="title">
+      <h1>贪吃蛇</h1>
+      <span>方向键 / WASD 移动 · 空格暂停</span>
+    </div>
+    <div class="scores">
+      <div class="score"><span>得分</span><b id="score">0</b></div>
+      <div class="score"><span>最高</span><b id="best">0</b></div>
+    </div>
+  </header>
+
+  <div class="board-wrap">
+    <canvas id="board" width="520" height="520" aria-label="贪吃蛇棋盘"></canvas>
+    <div class="overlay" id="overlay">
+      <div class="card">
+        <h2 id="overlay-title">准备好了吗？</h2>
+        <p id="overlay-desc">吃到果实变长，撞墙或撞到自己就结束。</p>
+        <button class="btn" id="overlay-btn" type="button">开始游戏</button>
+        <div class="keys">
+          <span><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> 或 <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span>
+          <span><kbd>Space</kbd> 暂停 / 继续</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+(() => {
+  'use strict'
+
+  const CELL = 26
+  const COLS = 20
+  const ROWS = 20
+  const TICK_BASE = 132
+  const TICK_MIN = 62
+
+  const canvas = document.getElementById('board')
+  const ctx = canvas.getContext('2d')
+  const scoreEl = document.getElementById('score')
+  const bestEl = document.getElementById('best')
+  const overlay = document.getElementById('overlay')
+  const overlayTitle = document.getElementById('overlay-title')
+  const overlayDesc = document.getElementById('overlay-desc')
+  const overlayBtn = document.getElementById('overlay-btn')
+
+  const COLORS = {
+    grid: 'rgba(148, 163, 184, .06)',
+    head: '#60a5fa',
+    body: '#3b82f6',
+    bodyDim: '#2563eb',
+    food: '#f59e0b',
+    foodGlow: 'rgba(245, 158, 11, .28)',
+  }
+
+  const DIRS = {
+    up: { x: 0, y: -1 },
+    down: { x: 0, y: 1 },
+    left: { x: -1, y: 0 },
+    right: { x: 1, y: 0 },
+  }
+
+  let snake, dir, nextDir, food, score, best, running, paused, tickMs, timer, deathFlash
+
+  best = Number(localStorage.getItem('aladdin:snake:best') || 0)
+  bestEl.textContent = String(best)
+
+  function reset() {
+    snake = [{ x: 9, y: 10 }, { x: 8, y: 10 }, { x: 7, y: 10 }]
+    dir = DIRS.right
+    nextDir = DIRS.right
+    score = 0
+    tickMs = TICK_BASE
+    running = false
+    paused = false
+    deathFlash = 0
+    scoreEl.textContent = '0'
+    placeFood()
+    draw()
+  }
+
+  function placeFood() {
+    const taken = new Set(snake.map((s) => s.x + ',' + s.y))
+    const free = []
+    for (let y = 0; y < ROWS; y += 1) {
+      for (let x = 0; x < COLS; x += 1) {
+        if (!taken.has(x + ',' + y)) free.push({ x, y })
+      }
+    }
+    food = free[Math.floor(Math.random() * free.length)] || null
+  }
+
+  function setOverlay(opts) {
+    if (!opts) {
+      overlay.classList.add('hidden')
+      return
+    }
+    overlay.classList.remove('hidden')
+    overlayTitle.textContent = opts.title
+    overlayDesc.textContent = opts.desc
+    overlayBtn.textContent = opts.action
+    overlayBtn.dataset.action = opts.intent
+  }
+
+  function handleOverlayAction() {
+    const intent = overlayBtn.dataset.action
+    if (intent === 'resume') {
+      paused = false
+      setOverlay(null)
+      return
+    }
+    start()
+  }
+
+  function start() {
+    reset()
+    running = true
+    setOverlay(null)
+    schedule()
+  }
+
+  function schedule() {
+    clearTimeout(timer)
+    if (!running || paused) return
+    timer = setTimeout(() => {
+      step()
+      schedule()
+    }, tickMs)
+  }
+
+  function step() {
+    if (!running || paused) return
+    dir = nextDir
+    const head = snake[0]
+    const next = { x: head.x + dir.x, y: head.y + dir.y }
+
+    if (next.x < 0 || next.y < 0 || next.x >= COLS || next.y >= ROWS) return gameOver()
+    if (snake.some((s, i) => i < snake.length - 1 && s.x === next.x && s.y === next.y)) {
+      return gameOver()
+    }
+
+    snake.unshift(next)
+    if (food && next.x === food.x && next.y === food.y) {
+      score += 10
+      scoreEl.textContent = String(score)
+      if (score > best) {
+        best = score
+        bestEl.textContent = String(best)
+        try { localStorage.setItem('aladdin:snake:best', String(best)) } catch (_) {}
+      }
+      tickMs = Math.max(TICK_MIN, tickMs - 2)
+      placeFood()
+    } else {
+      snake.pop()
+    }
+    draw()
+  }
+
+  function gameOver() {
+    running = false
+    clearTimeout(timer)
+    deathFlash = 1
+    draw()
+    setTimeout(() => {
+      setOverlay({
+        title: '游戏结束',
+        desc: '本局得分 ' + score + '，最高 ' + best + '。再来一局？',
+        action: '重新开始',
+        intent: 'start',
+      })
+    }, 140)
+  }
+
+  function draw() {
+    const w = canvas.width
+    const h = canvas.height
+
+    ctx.clearRect(0, 0, w, h)
+
+    // 棋盘
+    ctx.strokeStyle = COLORS.grid
+    ctx.lineWidth = 1
+    for (let i = 1; i < COLS; i += 1) {
+      ctx.beginPath()
+      ctx.moveTo(i * CELL + 0.5, 0)
+      ctx.lineTo(i * CELL + 0.5, h)
+      ctx.stroke()
+    }
+    for (let j = 1; j < ROWS; j += 1) {
+      ctx.beginPath()
+      ctx.moveTo(0, j * CELL + 0.5)
+      ctx.lineTo(w, j * CELL + 0.5)
+      ctx.stroke()
+    }
+
+    // 食物
+    if (food) {
+      const cx = food.x * CELL + CELL / 2
+      const cy = food.y * CELL + CELL / 2
+      ctx.fillStyle = COLORS.foodGlow
+      ctx.beginPath()
+      ctx.arc(cx, cy, CELL * 0.62, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = COLORS.food
+      ctx.beginPath()
+      ctx.arc(cx, cy, CELL * 0.3, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    // 蛇
+    snake.forEach((seg, i) => {
+      const pad = i === 0 ? 2 : 3
+      const x = seg.x * CELL + pad
+      const y = seg.y * CELL + pad
+      const size = CELL - pad * 2
+      const radius = i === 0 ? 8 : 6
+      ctx.fillStyle = i === 0
+        ? COLORS.head
+        : (i % 2 ? COLORS.body : COLORS.bodyDim)
+      roundRect(ctx, x, y, size, size, radius)
+      ctx.fill()
+    })
+
+    // 眼睛
+    const head = snake[0]
+    if (head) {
+      const cx = head.x * CELL + CELL / 2
+      const cy = head.y * CELL + CELL / 2
+      const off = CELL * 0.16
+      const eye = Math.max(2, CELL * 0.09)
+      const ex = dir.x * off * 0.6
+      const ey = dir.y * off * 0.6
+      ctx.fillStyle = '#0f172a'
+      ctx.beginPath()
+      ctx.arc(cx + ex - (dir.x ? 0 : off), cy + ey - (dir.y ? 0 : off), eye, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.beginPath()
+      ctx.arc(cx + ex + (dir.x ? 0 : off), cy + ey + (dir.y ? 0 : off), eye, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    if (deathFlash > 0) {
+      ctx.fillStyle = 'rgba(239, 68, 68, ' + (0.22 * deathFlash) + ')'
+      ctx.fillRect(0, 0, w, h)
+      deathFlash = Math.max(0, deathFlash - 0.08)
+      if (deathFlash > 0) requestAnimationFrame(draw)
+    }
+  }
+
+  function roundRect(context, x, y, width, height, radius) {
+    const r = Math.min(radius, width / 2, height / 2)
+    context.beginPath()
+    context.moveTo(x + r, y)
+    context.arcTo(x + width, y, x + width, y + height, r)
+    context.arcTo(x + width, y + height, x, y + height, r)
+    context.arcTo(x, y + height, x, y, r)
+    context.arcTo(x, y, x + width, y, r)
+    context.closePath()
+  }
+
+  function turn(name) {
+    const target = DIRS[name]
+    if (!target) return
+    // 禁止 180° 反向
+    if (target.x === -dir.x && target.y === -dir.y) return
+    nextDir = target
+  }
+
+  function togglePause() {
+    if (!running) return
+    paused = !paused
+    if (paused) {
+      clearTimeout(timer)
+      setOverlay({
+        title: '已暂停',
+        desc: '按空格或点击按钮继续。',
+        action: '继续',
+        intent: 'resume',
+      })
+    } else {
+      setOverlay(null)
+      schedule()
+    }
+  }
+
+  const KEYMAP = {
+    ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+    w: 'up', s: 'down', a: 'left', d: 'right',
+    W: 'up', S: 'down', A: 'left', D: 'right',
+  }
+
+  window.addEventListener('keydown', (event) => {
+    if (event.key === ' ' || event.code === 'Space') {
+      event.preventDefault()
+      togglePause()
+      return
+    }
+    const name = KEYMAP[event.key]
+    if (name) {
+      event.preventDefault()
+      turn(name)
+    }
+  })
+
+  overlayBtn.addEventListener('click', handleOverlayAction)
+
+  // 触屏滑动
+  let touchStart = null
+  canvas.addEventListener('touchstart', (event) => {
+    const t = event.changedTouches[0]
+    touchStart = { x: t.clientX, y: t.clientY }
+  }, { passive: true })
+  canvas.addEventListener('touchend', (event) => {
+    if (!touchStart) return
+    const t = event.changedTouches[0]
+    const dx = t.clientX - touchStart.x
+    const dy = t.clientY - touchStart.y
+    touchStart = null
+    if (Math.abs(dx) < 18 && Math.abs(dy) < 18) {
+      togglePause()
+      return
+    }
+    if (Math.abs(dx) > Math.abs(dy)) turn(dx > 0 ? 'right' : 'left')
+    else turn(dy > 0 ? 'down' : 'up')
+  }, { passive: true })
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && running && !paused) togglePause()
+  })
+
+  reset()
+  setOverlay({
+    title: '准备好了吗？',
+    desc: '吃到果实变长，撞墙或撞到自己就结束。',
+    action: '开始游戏',
+    intent: 'start',
+  })
+})()
+</script>
+</body>
+</html>

@@ -206,3 +206,24 @@ export function startTask(
     { method: 'POST', body: JSON.stringify({ expectedVersion }) },
   )
 }
+
+export function reconcileStep(
+  stepId: string,
+  verdict: 'completed' | 'failed',
+  evidence = '',
+): Promise<unknown> {
+  return request<unknown>(`/steps/${encodeURIComponent(stepId)}/reconcile`, {
+    method: 'POST',
+    body: JSON.stringify({ verdict, evidence }),
+  })
+}
+
+export function cancelIssue(
+  taskId: string,
+  expectedVersion?: number,
+): Promise<unknown> {
+  return request<unknown>(`/issues/${encodeURIComponent(taskId)}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify(expectedVersion ? { expectedVersion } : {}),
+  })
+}

@@ -59,9 +59,13 @@ func redactValue(value any) any {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, item := range typed {
+			// 只脱敏字符串值：计数类字段（如 input_tokens）是数字，不能被替换，
+			// 否则会破坏事件结构（曾导致 step_done 解析失败、任务误判超时）。
 			if isSensitiveKey(key) {
-				typed[key] = "***"
-				continue
+				if _, isText := item.(string); isText {
+					typed[key] = "***"
+					continue
+				}
 			}
 			typed[key] = redactValue(item)
 		}

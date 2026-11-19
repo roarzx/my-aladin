@@ -163,6 +163,7 @@ func (h *Hub) handleHeartbeat(ctx context.Context, env protocol.Envelope) {
 	if err := json.Unmarshal(env.Payload, &payload); err != nil {
 		return
 	}
+	h.log.Debug("收到心跳", "active", len(payload.ActiveExecutions))
 	for _, active := range payload.ActiveExecutions {
 		if err := h.Lease.RenewByExecution(ctx, active.ExecutionID, active.LeaseEpoch); err != nil {
 			h.log.Debug("续约被拒绝", "execution", active.ExecutionID,

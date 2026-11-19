@@ -84,12 +84,12 @@ describe('IssueCockpit', () => {
     const api = makeApi()
     renderCockpit({ taskId: 'task-1', api })
 
-    expect(await screen.findByText('修复登录')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /修复登录/ })).toBeInTheDocument()
     expect(screen.getByTestId('task-status')).toHaveTextContent('执行中')
     expect(screen.getByTestId('step-status-1')).toHaveTextContent('已完成')
     expect(screen.getByTestId('step-status-2')).toHaveTextContent('失败')
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
-    expect(screen.getByText(/失败步骤 2/)).toBeInTheDocument()
+    expect(screen.getByText(/存在 1 个失败步骤/)).toBeInTheDocument()
     expect(api.fetchPlan).toHaveBeenCalledWith('task-1', 2)
   })
 
@@ -111,16 +111,20 @@ describe('IssueCockpit', () => {
     }
 
     const api = makeApi()
+    const user = userEvent.setup()
     renderCockpit({
       taskId: 'task-1',
       api,
       eventsFetcher: streamOf([page1, page2]),
     })
 
+    // 时间线在「记录」标签页内
+    await user.click(await screen.findByRole('tab', { name: '记录' }))
+
     await screen.findByTestId('event-1')
     await screen.findByTestId('event-4')
     expect(screen.getByTestId('event-2')).toBeInTheDocument()
-    expect(screen.queryAllByText(/step\.dispatched/)).toHaveLength(1)
+    expect(screen.queryAllByText(/步骤已派发/)).toHaveLength(1)
   })
 
   it('点击重试调用接口并刷新状态', async () => {
