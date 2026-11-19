@@ -21,6 +21,7 @@ func TestTaskStatusTerminal(t *testing.T) {
 		TaskExecuting:  false,
 		TaskCancelling: false,
 		TaskChatting:   false,
+		TaskCompleted:  false,
 	}
 	for s, want := range terminal {
 		if got := s.IsTerminal(); got != want {

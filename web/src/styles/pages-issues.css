@@ -1175,3 +1175,75 @@
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* ---- 任务产物：会话中的可下载文件卡片 ---- */
+.artifact-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.artifact-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(520px, 100%);
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.artifact-card:hover {
+  border-color: var(--blue-2);
+  box-shadow: var(--shadow-soft);
+}
+
+.artifact-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.artifact-meta {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.artifact-meta strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-meta small {
+  color: var(--faint);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-action {
+  flex: none;
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 500;
+}

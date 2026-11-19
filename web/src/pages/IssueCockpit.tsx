@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent, type Keyboar
 import {
   cancelIssue,
   confirmPlan,
+  downloadArtifact,
+  fetchArtifacts,
   fetchEvents,
   fetchIssue,
   fetchPlan,
@@ -10,6 +12,7 @@ import {
   retryStep,
   startTask,
   submitPlan,
+  type Artifact,
   type EventPage,
   type IssueDetail,
   type PlanDetail,
@@ -39,6 +42,10 @@ export interface CockpitApi {
   reconcileStep?: typeof reconcileStep
   /** 取消任务（POST /issues/{id}/cancel）。 */
   cancelIssue?: typeof cancelIssue
+  /** 任务产物列表（GET /issues/{id}/artifacts）。 */
+  fetchArtifacts?: typeof fetchArtifacts
+  /** 产物下载。 */
+  downloadArtifact?: typeof downloadArtifact
 }
 
 const defaultApi: CockpitApi = {
@@ -50,6 +57,8 @@ const defaultApi: CockpitApi = {
   startTask,
   reconcileStep,
   cancelIssue,
+  fetchArtifacts,
+  downloadArtifact,
 }
 
 export interface IssueCockpitProps {
@@ -66,6 +75,7 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   paused: '已暂停',
   cancelling: '取消中',
   chatting: '对话中',
+  completed: '已完成',
   cancelled: '已取消',
   failed: '已失败',
 }
@@ -77,6 +87,7 @@ const STATUS_TONES: Record<TaskStatus, TagTone> = {
   paused: 'paused',
   cancelling: 'queued',
   chatting: 'review',
+  completed: 'done',
   cancelled: 'cancelled',
   failed: 'failed',
 }
@@ -119,6 +130,20 @@ const PLAN_STATUS_META: Record<string, { label: string; tone: TagTone }> = {
 
 function planStatusMeta(status: string): { label: string; tone: TagTone } {
   return PLAN_STATUS_META[status] ?? { label: status, tone: 'muted' }
+}
+
+function formatBytes(size: number): string {
+  if (!Number.isFinite(size) || size < 0) return '—'
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
+/** 产物卡片上的扩展名徽标。 */
+function fileBadge(name: string): string {
+  const dot = name.lastIndexOf('.')
+  if (dot <= 0 || dot === name.length - 1) return 'FILE'
+  return name.slice(dot + 1).toUpperCase().slice(0, 4)
 }
 
 function formatTime(value: string): string {
@@ -168,6 +193,7 @@ export default function IssueCockpit({
   const [infoOpen, setInfoOpen] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [draft, setDraft] = useState('')
+  const [artifacts, setArtifacts] = useState<Artifact[]>([])
 
   // 提交计划表单：正文默认取自创建任务时暂存在浏览器侧的描述。
   const [planContent, setPlanContent] = useState('')
@@ -197,6 +223,13 @@ export default function IssueCockpit({
       const next = await api.fetchIssue(taskId)
       setDetail(next)
       setLoadError(null)
+      if (api.fetchArtifacts) {
+        try {
+          setArtifacts(await api.fetchArtifacts(taskId))
+        } catch {
+          setArtifacts([])
+        }
+      }
       if (next.plan) {
         setPlanDetail(await api.fetchPlan(taskId, next.plan.revision))
       } else {
@@ -267,6 +300,18 @@ export default function IssueCockpit({
       toast('复制失败，请手动复制地址栏链接')
     }
   }, [])
+
+  const onDownload = useCallback(
+    async (item: Artifact) => {
+      const run = api.downloadArtifact ?? downloadArtifact
+      try {
+        await run(taskId, item)
+      } catch (err) {
+        toast(`下载失败：${err instanceof Error ? err.message : String(err)}`)
+      }
+    },
+    [api, taskId],
+  )
 
   if (!taskId) {
     return (
@@ -748,6 +793,44 @@ export default function IssueCockpit({
                 </div>
               </article>
             )}
+
+            {artifacts.length > 0 ? (
+              <article className="msg" aria-label="任务产物">
+                <Avatar kind="planner" label="产" />
+                <div className="msg-main">
+                  <div className="msg-head">
+                    <strong>产物</strong>
+                    <span className="msg-time">{artifacts.length} 个文件</span>
+                  </div>
+                  <div className="artifact-list">
+                    {artifacts.map((item) => {
+                      const name = item.path.split('/').pop() || item.path
+                      return (
+                        <button
+                          type="button"
+                          className="artifact-card"
+                          key={item.id}
+                          onClick={() => void onDownload(item)}
+                          title={item.path}
+                        >
+                          <span className="artifact-icon" aria-hidden>
+                            {fileBadge(name)}
+                          </span>
+                          <span className="artifact-meta">
+                            <strong>{name}</strong>
+                            <small>
+                              {formatBytes(item.sizeBytes)}
+                              {item.path !== name ? ` · ${item.path}` : ''}
+                            </small>
+                          </span>
+                          <span className="artifact-action">下载</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </article>
+            ) : null}
 
             {actionError ? (
               <p role="alert" className="error">

@@ -20,6 +20,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/roarzx/my-aladin/internal/activity"
+	"github.com/roarzx/my-aladin/internal/artifact"
 	"github.com/roarzx/my-aladin/internal/auth"
 	"github.com/roarzx/my-aladin/internal/buildinfo"
 	"github.com/roarzx/my-aladin/internal/config"
@@ -170,6 +171,13 @@ func run(cfgPath string) error {
 	reconcileHandler := &recovery.Handler{
 		DB: db, Members: &mysqlstore.WorkspaceStore{DB: db}, Reconciler: reconciler,
 	}
+	artifactService := &artifact.Service{
+		DB: db, Root: cfg.Storage.ArtifactRoot, Log: slog.Default(),
+	}
+	artifactHandler := &artifact.Handler{
+		Service: artifactService, DB: db, Members: &mysqlstore.WorkspaceStore{DB: db},
+	}
+
 	planHandler := &plan.Handler{
 		DB:      db,
 		Members: &mysqlstore.WorkspaceStore{DB: db},
@@ -223,6 +231,7 @@ func run(cfgPath string) error {
 				r.Post("/flow-run-nodes/{id}/complete", flowHandler.Complete)
 				r.Post("/flow-run-nodes/{id}/fail", flowHandler.Fail)
 				r.Post("/flow-run-nodes/{id}/cancel-ack", flowHandler.CancelAck)
+				r.Post("/artifacts", artifactHandler.Upload)
 			})
 		},
 		RegisterGlobal: func(r chi.Router) {
@@ -239,6 +248,8 @@ func run(cfgPath string) error {
 			r.Post("/issues/{id}/start", planHandler.Start)
 			r.Post("/steps/{id}/retry", retryHandler.Retry)
 			r.Get("/issues/{id}/events", activityHandler.List)
+			r.Get("/issues/{id}/artifacts", artifactHandler.List)
+			r.Get("/issues/{id}/artifacts/{artifactId}/content", artifactHandler.Download)
 		},
 		RegisterWorkspace: func(r chi.Router) {
 			r.With(auth.RequireAction(auth.ActionCreateIssue, nil)).

@@ -282,7 +282,7 @@ func (h *EventHandler) advance(ctx context.Context, planID string) error {
 		return err
 	}
 	_, _ = mysqlstore.UpdateTaskState(ctx, h.DB, plan.TaskID,
-		domain.TaskExecuting, domain.TaskChatting, task.Version)
+		domain.TaskExecuting, domain.TaskCompleted, task.Version)
 	return nil
 }
 

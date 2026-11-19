@@ -28,7 +28,9 @@ type StepHandler struct {
 	PRCreator PRCreator
 	// Running 登记本机执行，供心跳续约与 stop_session 使用（E4/E9）。
 	Running *RunningExecutions
-	Log     *slog.Logger
+	// Artifacts 上报产物；为空时跳过（例如未配置 APIURL）。
+	Artifacts ArtifactUploader
+	Log       *slog.Logger
 }
 
 type stepParams struct {
@@ -234,6 +236,8 @@ func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender)
 				return
 			}
 		}
+		// 产物上传失败不影响步骤结果，只记日志。
+		h.uploadArtifacts(ctx, params, workDir, runStarted)
 		if err := sender.SendEvent("step_done", params.ExecutionID, params.AttemptNo, params.StepID, map[string]any{
 			"attempt_no":     params.AttemptNo,
 			"summary_digest": summaryDigest,
@@ -249,6 +253,23 @@ func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender)
 	default:
 		h.fail(sender, params, "verification", false,
 			fmt.Errorf("prompt 以 %q 结束", result.StopReason))
+	}
+}
+
+// uploadArtifacts 把本次执行期间新增/修改的文件上报给控制面。
+func (h *StepHandler) uploadArtifacts(ctx context.Context, params stepParams, workDir string, since time.Time) {
+	if h.Artifacts == nil || workDir == "" {
+		return
+	}
+	files := collectArtifacts(workDir, since)
+	for _, file := range files {
+		if err := h.Artifacts.UploadArtifact(ctx, params.ExecutionID,
+			file.relPath, file.contentType, file.data); err != nil {
+			h.log().Warn("上传产物失败", "path", file.relPath, "err", err)
+		}
+	}
+	if len(files) > 0 {
+		h.log().Info("产物已上报", "step", params.StepID, "count", len(files))
 	}
 }
 

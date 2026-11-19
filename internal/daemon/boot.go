@@ -165,6 +165,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	if cfg.Daemon.APIURL != "" {
 		cli := NewCLIClient(cfg.Daemon.APIURL, token)
+		stepHandler.Artifacts = cli
 		worker := &FlowNodeWorker{
 			Client: cli, ProviderConfig: providerConfig, Spawner: reaper,
 			Interval: 3 * time.Second, Heartbeat: 10 * time.Second, Log: slog.Default(),

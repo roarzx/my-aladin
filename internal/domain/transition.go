@@ -22,7 +22,7 @@ var (
 		TaskExecuting: {
 			EvStepFailed:          TaskPaused,
 			EvStepReconciling:     TaskPaused,
-			EvPlanCompleted:       TaskChatting,
+			EvPlanCompleted:       TaskCompleted,
 			EvTaskCancelRequested: TaskCancelling,
 		},
 		TaskPaused: {
@@ -34,6 +34,9 @@ var (
 			EvTaskCancelTimeout:   TaskCancelled,
 		},
 		TaskChatting: {
+			EvPlanAppended: TaskPlanConfirming,
+		},
+		TaskCompleted: {
 			EvPlanAppended: TaskPlanConfirming,
 		},
 	}

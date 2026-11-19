@@ -7,6 +7,7 @@ export type TaskStatus =
   | 'chatting'
   | 'cancelled'
   | 'failed'
+  | 'completed'
 
 export interface Task {
   id: string
@@ -123,6 +124,40 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(err?.code ?? `HTTP_${res.status}`, err?.message ?? res.statusText)
   }
   return body.data as T
+}
+
+export interface Artifact {
+  id: string
+  taskId: string
+  stepId?: string
+  attemptId?: string
+  path: string
+  sha256: string
+  sizeBytes: number
+  contentType: string
+}
+
+export function fetchArtifacts(taskId: string): Promise<Artifact[]> {
+  return request<Artifact[]>(`/issues/${encodeURIComponent(taskId)}/artifacts`)
+}
+
+/** 产物下载：带令牌请求后转成 blob 触发浏览器保存。 */
+export async function downloadArtifact(taskId: string, artifact: Artifact): Promise<void> {
+  const url = `${API_BASE}/issues/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifact.id)}/content`
+  const res = await fetch(url, { headers: authHeaders() })
+  if (!res.ok) {
+    const body = await res.json().catch(() => null)
+    throw new ApiError(body?.error?.code ?? `HTTP_${res.status}`, body?.error?.message ?? res.statusText)
+  }
+  const blob = await res.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectUrl
+  link.download = artifact.path.split('/').pop() || 'artifact'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(objectUrl)
 }
 
 export function fetchIssues(limit = 50): Promise<Task[]> {

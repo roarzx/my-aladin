@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -264,4 +265,15 @@ func (c *CLIClient) FailFlowNode(ctx context.Context, nodeID string, epoch uint6
 func (c *CLIClient) AckFlowNodeCancel(ctx context.Context, nodeID string) error {
 	return c.do(ctx, http.MethodPost,
 		"/api/v1/cli/flow-run-nodes/"+url.PathEscape(nodeID)+"/cancel-ack", nil, nil)
+}
+
+// UploadArtifact 上报一份产物（base64 传输，单文件上限由服务端校验）。
+func (c *CLIClient) UploadArtifact(ctx context.Context, executionID, path, contentType string, data []byte) error {
+	body := map[string]any{
+		"execution_id":   executionID,
+		"path":           path,
+		"content_type":   contentType,
+		"content_base64": base64.StdEncoding.EncodeToString(data),
+	}
+	return c.do(ctx, http.MethodPost, "/api/v1/cli/artifacts", body, nil)
 }

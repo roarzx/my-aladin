@@ -13,6 +13,7 @@ const STATUS_META: Record<TaskStatus, { label: string; tone: TagTone }> = {
   paused: { label: '已暂停', tone: 'paused' },
   cancelling: { label: '取消中', tone: 'queued' },
   chatting: { label: '对话中', tone: 'review' },
+  completed: { label: '已完成', tone: 'done' },
   cancelled: { label: '已取消', tone: 'cancelled' },
   failed: { label: '已失败', tone: 'failed' },
 }
@@ -56,7 +57,7 @@ export default function Dashboard() {
     (task) => task.status === 'executing' || task.status === 'chatting',
   ).length
   const failedCount = list.filter((task) => task.status === 'failed').length
-  const cancelledCount = list.filter((task) => task.status === 'cancelled').length
+  const completedCount = list.filter((task) => task.status === 'completed').length
   const attention = list
     .filter((task) => ATTENTION_STATUSES.includes(task.status))
     .slice(0, 4)
@@ -121,9 +122,9 @@ export default function Dashboard() {
               urgent
             />
             <MetricCard
-              label="已取消"
-              value={cancelledCount}
-              foot="用户取消或中断的任务"
+              label="已完成"
+              value={completedCount}
+              foot="计划全部完成，可查看产物或继续对话"
               to="/task/list"
             />
           </div>

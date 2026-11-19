@@ -63,7 +63,7 @@ func (s *Service) Propose(ctx context.Context, taskID string, req Proposal) (dom
 		event = domain.EvPlanSubmitted
 	case domain.TaskPlanConfirming:
 		event = domain.EvPlanRevised
-	case domain.TaskChatting:
+	case domain.TaskChatting, domain.TaskCompleted:
 		event = domain.EvPlanAppended
 	default:
 		return domain.Plan{}, nil, errcode.Newf(errcode.Conflict, "任务状态 %s 不接受计划", task.Status)

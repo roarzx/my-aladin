@@ -33,13 +33,15 @@ const (
 	TaskPaused         TaskStatus = "paused"
 	TaskCancelling     TaskStatus = "cancelling"
 	TaskChatting       TaskStatus = "chatting"
-	TaskCancelled      TaskStatus = "cancelled"
-	TaskFailed         TaskStatus = "failed"
+	// TaskCompleted 表示计划已全部完成；仍可追加新计划继续对话式修改。
+	TaskCompleted TaskStatus = "completed"
+	TaskCancelled TaskStatus = "cancelled"
+	TaskFailed    TaskStatus = "failed"
 )
 
 var allTaskStatuses = []TaskStatus{
 	TaskPending, TaskPlanConfirming, TaskExecuting, TaskPaused,
-	TaskCancelling, TaskChatting, TaskCancelled, TaskFailed,
+	TaskCancelling, TaskChatting, TaskCompleted, TaskCancelled, TaskFailed,
 }
 
 // Valid 校验状态取值。

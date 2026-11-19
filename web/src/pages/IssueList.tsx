@@ -13,6 +13,7 @@ const STATUS_META: Record<TaskStatus, { label: string; tone: TagTone }> = {
   paused: { label: '已暂停', tone: 'failed' },
   cancelling: { label: '取消中', tone: 'queued' },
   chatting: { label: '对话中', tone: 'running' },
+  completed: { label: '已完成', tone: 'done' },
   cancelled: { label: '已取消', tone: 'cancelled' },
   failed: { label: '已失败', tone: 'failed' },
 }
@@ -46,7 +47,7 @@ const BOARD_GROUPS: Array<{
     key: 'done',
     title: '已完成',
     desc: '可查看产出或创建类似任务。',
-    statuses: ['cancelled'],
+    statuses: ['completed', 'cancelled'],
   },
 ]
 

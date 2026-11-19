@@ -56,7 +56,7 @@ func TestStepDoneAdvancesPlan(t *testing.T) {
 		t.Fatalf("plan = %+v, err=%v", plan, err)
 	}
 	task, _ := mysqlstore.GetTask(ctx, f.db, f.taskID)
-	if task.Status != domain.TaskChatting {
+	if task.Status != domain.TaskCompleted {
 		t.Fatalf("task = %q", task.Status)
 	}
 }
