@@ -132,7 +132,7 @@ func (p *Provider) start(ctx context.Context) (*Session, error) {
 	cmd := exec.Command(bin)
 	cmd.Dir = p.cfg.Cwd
 	if len(p.cfg.Env) > 0 {
-		cmd.Env = append(os.Environ(), p.cfg.Env...)
+		cmd.Env = mergeEnv(os.Environ(), p.cfg.Env)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -434,4 +434,38 @@ func (rw *readWriteCloser) Close() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// mergeEnv 把 extra 合并进 base：同名键由 extra 覆盖且只保留一份。
+//
+// 直接 append 会让子进程同时看到两个同名变量，POSIX getenv 取第一个，
+// 结果 extra 永远不生效（PATH、ALADDIN_* 都踩过这个坑）。
+func mergeEnv(base, extra []string) []string {
+	index := make(map[string]int, len(base)+len(extra))
+	out := make([]string, 0, len(base)+len(extra))
+	for _, kv := range base {
+		key := envKey(kv)
+		if _, seen := index[key]; seen {
+			continue
+		}
+		index[key] = len(out)
+		out = append(out, kv)
+	}
+	for _, kv := range extra {
+		key := envKey(kv)
+		if i, ok := index[key]; ok {
+			out[i] = kv
+			continue
+		}
+		index[key] = len(out)
+		out = append(out, kv)
+	}
+	return out
+}
+
+func envKey(kv string) string {
+	if i := strings.IndexByte(kv, '='); i >= 0 {
+		return kv[:i]
+	}
+	return kv
 }

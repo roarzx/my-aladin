@@ -100,6 +100,7 @@ func (h *Hub) Dispatch(ctx context.Context, req runtime.DispatchRequest) (string
 		"execution_id":        req.ExecutionID,
 		"task_id":             req.TaskID,
 		"step_id":             req.StepID,
+		"agent_id":            req.AgentID,
 		"attempt_no":          req.AttemptNo,
 		"lease_epoch":         req.LeaseEpoch,
 		"branch":              req.Branch,

@@ -128,6 +128,7 @@ func (r *PlanRunner) RunOnce(ctx context.Context, taskID string) error {
 			MachineID:         a.MachineID,
 			TaskID:            taskID,
 			StepID:            next.ID,
+			AgentID:           a.ID,
 			AttemptNo:         attemptNo,
 			LeaseEpoch:        attempt.LeaseEpoch,
 			Branch:            task.PlanBranch,

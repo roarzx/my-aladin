@@ -18,12 +18,16 @@ import (
 // CreateRequest 对应 9.6 的 POST /workspaces/{wid}/issues 请求体。
 type CreateRequest struct {
 	Name           string          `json:"name"`
+	Requirement    string          `json:"requirementContent"`
+	InformDoc      string          `json:"informDoc"`
 	Mode           domain.TaskMode `json:"mode"`
 	TemplateID     string          `json:"templateId"`
 	AgentIDs       []string        `json:"agentIds"`
 	PlannerAgentID string          `json:"plannerAgentId"`
 	SquadID        string          `json:"squadId"`
 	Repositories   []string        `json:"repositories"`
+	// IdempotencyKey 是 CLI create 的幂等键；重复提交返回首次创建的 Issue。
+	IdempotencyKey string `json:"idempotencyKey"`
 }
 
 // Service 负责任务创建：模板展开、成员校验与快照落库。
@@ -47,6 +51,8 @@ type snapshot struct {
 	PlannerAgentID string          `json:"plannerAgentId"`
 	Agents         []agentRef      `json:"agents"`
 	Repositories   []string        `json:"repositories"`
+	// IdempotencyKey 记录 CLI create 的幂等键，供重复调用返回同一 Issue。
+	IdempotencyKey string `json:"cliIdempotencyKey,omitempty"`
 }
 
 // Create 在单个事务内完成：校验 → 展开模板 → 写任务/成员/仓库。
@@ -150,6 +156,7 @@ func (s *Service) Create(ctx context.Context, creatorID uint64, workspaceID stri
 		PlannerAgentID: req.PlannerAgentID,
 		Agents:         refs,
 		Repositories:   req.Repositories,
+		IdempotencyKey: req.IdempotencyKey,
 	}
 	raw, err := json.Marshal(snap)
 	if err != nil {
@@ -162,6 +169,8 @@ func (s *Service) Create(ctx context.Context, creatorID uint64, workspaceID stri
 		WorkspaceID:    workspaceID,
 		CreatedBy:      creatorID,
 		Name:           req.Name,
+		Requirement:    req.Requirement,
+		InformDoc:      req.InformDoc,
 		Mode:           req.Mode,
 		Status:         domain.TaskPending,
 		ConfigSnapshot: raw,

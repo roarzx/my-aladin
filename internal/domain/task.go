@@ -3,6 +3,7 @@ package domain
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -59,12 +60,44 @@ func (s TaskStatus) IsTerminal() bool {
 	return s == TaskCancelled || s == TaskFailed
 }
 
+// reportedStatusAliases 是 Agent 上报时可用的别名。
+//
+// Agent 面对的是「进行中 / 阻塞 / 完成」，不必知道库里的枚举名。
+var reportedStatusAliases = map[string]TaskStatus{
+	"in_progress": TaskExecuting,
+	"running":     TaskExecuting,
+	"blocked":     TaskPaused,
+	"waiting":     TaskPaused,
+	"done":        TaskCompleted,
+	"canceled":    TaskCancelled,
+}
+
+// ParseReportedStatus 解析 Agent 上报的状态名，接受别名与库内枚举名。
+func ParseReportedStatus(raw string) (TaskStatus, error) {
+	key := strings.ToLower(strings.TrimSpace(raw))
+	if key == "" {
+		return "", fmt.Errorf("状态不能为空")
+	}
+	if alias, ok := reportedStatusAliases[key]; ok {
+		return alias, nil
+	}
+	status := TaskStatus(key)
+	if err := status.Valid(); err != nil {
+		return "", err
+	}
+	return status, nil
+}
+
 // Task 是任务聚合根（与 Issue 为同一记录）。
 type Task struct {
-	ID                string
-	WorkspaceID       string
-	CreatedBy         uint64
-	Name              string
+	ID          string
+	WorkspaceID string
+	CreatedBy   uint64
+	Name        string
+	// Requirement 是需求正文（CLI `issue create --requirement-content` 写入）。
+	Requirement string
+	// InformDoc 是告知规则/补充文档。
+	InformDoc         string
 	Mode              TaskMode
 	Status            TaskStatus
 	Version           uint64
@@ -74,4 +107,25 @@ type Task struct {
 	CancelRequestedAt *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+}
+
+// ReportStatus 接受 Agent 通过 CLI 上报的状态（`issue update-status`）。
+//
+// 新模型下 Issue 状态由 Agent 驱动，平台不再用 taskTransitions 约束它：
+// 这里只做取值校验与「终态不可复活」的保护。已完成/已暂停可以回到进行中
+// （用户追问后继续干），已取消/已失败则保持终态，避免误复活。
+func (t *Task) ReportStatus(next TaskStatus) error {
+	if err := next.Valid(); err != nil {
+		return err
+	}
+	if t.Status == next {
+		return nil
+	}
+	if t.Status.IsTerminal() {
+		return fmt.Errorf("任务已处于终态 %q，不能再上报为 %q", t.Status, next)
+	}
+	t.Status = next
+	t.Version++
+	t.UpdatedAt = time.Now().UTC()
+	return nil
 }

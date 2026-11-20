@@ -11,7 +11,9 @@ type DispatchRequest struct {
 	MachineID   string
 	TaskID      string
 	StepID      string
-	AttemptNo   uint32
+	// AgentID 是执行本步骤的 Agent（注入给平台 CLI 作为身份）。
+	AgentID   string
+	AttemptNo uint32
 	// LeaseEpoch 是本次尝试的执行租约代次（心跳续约时校验）。
 	LeaseEpoch uint64
 	Branch     string

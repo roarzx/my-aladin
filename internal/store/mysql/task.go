@@ -18,10 +18,12 @@ func InsertTask(ctx context.Context, ex Executor, t domain.Task) error {
 		return err
 	}
 	_, err := ex.ExecContext(ctx, `
-		INSERT INTO tasks (id, workspace_id, created_by, name, mode, status, version,
-			activity_seq, plan_branch, config_snapshot, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.WorkspaceID, t.CreatedBy, t.Name, string(t.Mode), string(t.Status),
+		INSERT INTO tasks (id, workspace_id, created_by, name, requirement, inform_doc,
+			mode, status, version, activity_seq, plan_branch, config_snapshot, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.WorkspaceID, t.CreatedBy, t.Name,
+		nullString(t.Requirement), nullString(t.InformDoc),
+		string(t.Mode), string(t.Status),
 		t.Version, t.ActivitySeq, nullString(t.PlanBranch), []byte(t.ConfigSnapshot),
 		t.CreatedAt, t.UpdatedAt)
 	if err != nil {
@@ -58,17 +60,21 @@ func InsertTaskRepository(ctx context.Context, ex Executor, taskID, repositoryID
 // GetTask 按 ID 读取任务；不存在返回 sql.ErrNoRows。
 func GetTask(ctx context.Context, ex Executor, id string) (domain.Task, error) {
 	var (
-		t          domain.Task
-		mode       string
-		status     string
-		planBranch sql.NullString
-		cancelAt   sql.NullTime
+		t           domain.Task
+		mode        string
+		status      string
+		requirement sql.NullString
+		informDoc   sql.NullString
+		planBranch  sql.NullString
+		cancelAt    sql.NullTime
 	)
 	err := ex.QueryRowContext(ctx, `
-		SELECT id, workspace_id, created_by, name, mode, status, version, activity_seq,
+		SELECT id, workspace_id, created_by, name, requirement, inform_doc,
+		       mode, status, version, activity_seq,
 		       plan_branch, config_snapshot, cancel_requested_at, created_at, updated_at
 		FROM tasks WHERE id = ?`, id).Scan(
-		&t.ID, &t.WorkspaceID, &t.CreatedBy, &t.Name, &mode, &status, &t.Version,
+		&t.ID, &t.WorkspaceID, &t.CreatedBy, &t.Name, &requirement, &informDoc,
+		&mode, &status, &t.Version,
 		&t.ActivitySeq, &planBranch, &t.ConfigSnapshot, &cancelAt, &t.CreatedAt, &t.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Task{}, sql.ErrNoRows
@@ -76,6 +82,8 @@ func GetTask(ctx context.Context, ex Executor, id string) (domain.Task, error) {
 	if err != nil {
 		return domain.Task{}, fmt.Errorf("读取任务: %w", err)
 	}
+	t.Requirement = requirement.String
+	t.InformDoc = informDoc.String
 	t.Mode = domain.TaskMode(mode)
 	t.Status = domain.TaskStatus(status)
 	t.PlanBranch = planBranch.String

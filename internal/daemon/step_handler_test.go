@@ -398,11 +398,61 @@ func TestStepHandlerNoChangesSkipsPR(t *testing.T) {
 }
 
 func TestPromptWithSystemPrefix(t *testing.T) {
-	if got := promptWithSystem(stepParams{Prompt: "do"}); got != "do" {
+	h := &StepHandler{}
+	if got := h.promptWithSystem(stepParams{Prompt: "do"}); got != "do" {
 		t.Fatalf("无 system_prompt 时应保持原样: %q", got)
 	}
-	got := promptWithSystem(stepParams{SystemPrompt: "sys", Prompt: "do"})
+	got := h.promptWithSystem(stepParams{SystemPrompt: "sys", Prompt: "do"})
 	if got != "sys\n\ndo" {
 		t.Fatalf("prompt = %q", got)
 	}
+}
+
+func TestPlatformInstructionsAndEnv(t *testing.T) {
+	h := &StepHandler{APIURL: "http://ctl:8080", Token: "tok", CLIPath: "/opt/aladdin"}
+	params := stepParams{TaskID: "issue-1", AgentID: "agent-1", ExecutionID: "exec-1", Prompt: "do"}
+
+	env := h.platformEnv(params)
+	want := map[string]string{
+		"ALADDIN_API_URL":      "http://ctl:8080",
+		"ALADDIN_TOKEN":        "tok",
+		"ALADDIN_ISSUE_ID":     "issue-1",
+		"ALADDIN_AGENT_ID":     "agent-1",
+		"ALADDIN_EXECUTION_ID": "exec-1",
+	}
+	for _, kv := range env {
+		key, value, ok := strings.Cut(kv, "=")
+		if !ok || key == "PATH" {
+			continue
+		}
+		if expected, known := want[key]; known && value != expected {
+			t.Fatalf("%s = %q，期望 %q", key, value, expected)
+		}
+	}
+	if !strings.HasPrefix(strings.Join(env, " "), "ALADDIN_API_URL=") && !containsEnv(env, "PATH=/opt/aladdin") {
+		t.Fatalf("PATH 应包含 CLI 目录: %v", env)
+	}
+
+	prompt := h.promptWithSystem(params)
+	if !strings.Contains(prompt, "issue update-status --id issue-1 --status completed") {
+		t.Fatalf("提示词缺少上报说明: %s", prompt)
+	}
+
+	// 没有配置控制面地址时不注入，也不添加说明。
+	bare := &StepHandler{}
+	if len(bare.platformEnv(params)) != 0 {
+		t.Fatal("未配置 APIURL 时不应注入环境变量")
+	}
+	if got := bare.promptWithSystem(params); got != "do" {
+		t.Fatalf("未配置 APIURL 时提示词应保持原样: %q", got)
+	}
+}
+
+func containsEnv(env []string, prefix string) bool {
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			return true
+		}
+	}
+	return false
 }

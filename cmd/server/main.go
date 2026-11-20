@@ -232,6 +232,18 @@ func run(cfgPath string) error {
 				r.Post("/flow-run-nodes/{id}/fail", flowHandler.Fail)
 				r.Post("/flow-run-nodes/{id}/cancel-ack", flowHandler.CancelAck)
 				r.Post("/artifacts", artifactHandler.Upload)
+				// Agent 侧 Issue 接口：aladdin openapi issue ...
+				// 用一个不带 OnCreated 的服务实例：CLI 建的 Issue 不自动拉起规划会话，
+				// 什么时候开始干活由 Agent 自己（或后续的单会话派发）决定。
+				cliTaskService := &task.Service{DB: db}
+				cliIssueHandler := &task.CLIHandler{DB: db, Service: cliTaskService}
+				r.Route("/issues", func(r chi.Router) {
+					r.Get("/", cliIssueHandler.List)
+					r.Post("/", cliIssueHandler.Create)
+					r.Get("/{id}", cliIssueHandler.Get)
+					r.Post("/{id}/status", cliIssueHandler.UpdateStatus)
+					r.Post("/{id}/input-requests", cliIssueHandler.InputRequest)
+				})
 			})
 		},
 		RegisterGlobal: func(r chi.Router) {

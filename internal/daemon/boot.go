@@ -166,6 +166,9 @@ func Run(ctx context.Context, opts Options) error {
 	if cfg.Daemon.APIURL != "" {
 		cli := NewCLIClient(cfg.Daemon.APIURL, token)
 		stepHandler.Artifacts = cli
+		// Agent 通过 `aladdin openapi issue ...` 上报状态，需要地址与令牌。
+		stepHandler.APIURL = cfg.Daemon.APIURL
+		stepHandler.Token = token
 		worker := &FlowNodeWorker{
 			Client: cli, ProviderConfig: providerConfig, Spawner: reaper,
 			Interval: 3 * time.Second, Heartbeat: 10 * time.Second, Log: slog.Default(),

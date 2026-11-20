@@ -24,6 +24,7 @@ const usage = `aladdin — 运维 CLI
   version            打印版本
   migrate            执行数据库迁移（--dsn 或环境变量 MYSQL_DSN）
   machine token      为机器签发一次性令牌（明文只打印一次）
+  openapi             Agent 侧平台接口（issue get/list/create/update-status/input）
   squad action       推进工作项（start|complete|block|cancel）
   squad handoff      交接工作项负责人
   squad context      读取 Agent 上下文
@@ -48,6 +49,8 @@ func main() {
 		err = runMachine(os.Args[2:])
 	case "squad":
 		err = runSquad(os.Args[2:])
+	case "openapi":
+		err = runOpenAPI(os.Args[2:])
 	case "daemon":
 		err = runDaemon(os.Args[2:])
 	case "reset":

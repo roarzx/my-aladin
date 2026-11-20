@@ -30,17 +30,25 @@ type StepHandler struct {
 	Running *RunningExecutions
 	// Artifacts 上报产物；为空时跳过（例如未配置 APIURL）。
 	Artifacts ArtifactUploader
-	Log       *slog.Logger
+	// APIURL / Token 用于把平台 CLI 需要的上下文注入到 Agent 进程，
+	// 让 Agent 能执行 `aladdin openapi issue update-status ...`。
+	APIURL string
+	Token  string
+	// CLIPath 覆盖包含 aladdin 可执行文件的目录；为空时取 daemon 所在目录。
+	CLIPath string
+	Log     *slog.Logger
 }
 
 type stepParams struct {
 	ExecutionID string `json:"execution_id"`
 	TaskID      string `json:"task_id"`
 	StepID      string `json:"step_id"`
-	AttemptNo   uint32 `json:"attempt_no"`
-	LeaseEpoch  uint64 `json:"lease_epoch"`
-	Branch      string `json:"branch"`
-	Prompt      string `json:"prompt"`
+	// AgentID 是执行本次步骤的 Agent，注入给 CLI 用于身份与归属校验。
+	AgentID    string `json:"agent_id"`
+	AttemptNo  uint32 `json:"attempt_no"`
+	LeaseEpoch uint64 `json:"lease_epoch"`
+	Branch     string `json:"branch"`
+	Prompt     string `json:"prompt"`
 	// 下列字段由控制面在派发时补齐（主路径计划第四节）。
 	WorkDir           string `json:"work_dir"`
 	RepoURL           string `json:"repo_url"`
@@ -111,9 +119,10 @@ func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender)
 		return
 	}
 
-	// Provider 配置在多个执行间共享，必须复制后再改 Cwd。
+	// Provider 配置在多个执行间共享，必须复制后再改 Cwd/Env。
 	cfg := h.ProviderConfig
 	cfg.Cwd = workDir
+	cfg.Env = append(cfg.Env, h.platformEnv(params)...)
 
 	var workspace *Workspace
 	if params.RepoURL != "" {
@@ -195,7 +204,7 @@ func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender)
 
 	// 汇总本轮助手输出，随 step_done 回传，用于会话页展示「回复」。
 	var reply strings.Builder
-	result, err := session.Prompt(ctx, promptWithSystem(params), func(event agentevent.Event) {
+	result, err := session.Prompt(ctx, h.promptWithSystem(params), func(event agentevent.Event) {
 		switch event.Kind {
 		case agentevent.KindToolCall, agentevent.KindToolUpdate:
 			handleTool(event)
@@ -353,11 +362,84 @@ func (h *StepHandler) workspaceDir(params stepParams) (string, error) {
 	return filepath.Join(params.WorkDir, "aladdin", shortID(params.TaskID)), nil
 }
 
-func promptWithSystem(params stepParams) string {
-	if params.SystemPrompt == "" {
-		return params.Prompt
+// promptWithSystem 拼装最终提示词：系统职责 + 步骤正文 + 平台上报说明。
+func (h *StepHandler) promptWithSystem(params stepParams) string {
+	parts := make([]string, 0, 3)
+	if params.SystemPrompt != "" {
+		parts = append(parts, params.SystemPrompt)
 	}
-	return params.SystemPrompt + "\n\n" + params.Prompt
+	parts = append(parts, params.Prompt)
+	if block := h.platformInstructions(params); block != "" {
+		parts = append(parts, block)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// platformEnv 把 Issue 上下文与机器令牌注入 Agent 进程。
+//
+// 未配置 APIURL/Token 时不注入：Agent 没有上报通道，也不该看到一个
+// 调用必然失败的 CLI。
+func (h *StepHandler) platformEnv(params stepParams) []string {
+	if h.APIURL == "" || h.Token == "" || params.TaskID == "" {
+		return nil
+	}
+	env := []string{
+		"ALADDIN_API_URL=" + h.APIURL,
+		"ALADDIN_TOKEN=" + h.Token,
+		"ALADDIN_ISSUE_ID=" + params.TaskID,
+		"ALADDIN_TASK_ID=" + params.TaskID,
+		"ALADDIN_AGENT_ID=" + params.AgentID,
+		"ALADDIN_EXECUTION_ID=" + params.ExecutionID,
+	}
+	if dir := h.cliDir(); dir != "" {
+		env = append(env, "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
+	return env
+}
+
+// cliDir 返回包含 aladdin 可执行文件的目录；找不到时返回空串。
+func (h *StepHandler) cliDir() string {
+	if h.CLIPath != "" {
+		return h.CLIPath
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Dir(exe)
+	if _, err := os.Stat(filepath.Join(dir, "aladdin")); err != nil {
+		return ""
+	}
+	return dir
+}
+
+// platformInstructions 告诉 Agent 唯一的完成通道：CLI 上报。
+func (h *StepHandler) platformInstructions(params stepParams) string {
+	if h.APIURL == "" || h.Token == "" || params.TaskID == "" {
+		return ""
+	}
+	issueID := params.TaskID
+	return strings.Join([]string{
+		"## 平台上报（必须执行）",
+		"",
+		"本次执行的 Issue：" + issueID,
+		"平台只能通过 CLI 得知你的结果；不调用下面的命令，Issue 会一直停留在当前状态。",
+		"`aladdin` 已在 PATH 中，令牌由环境变量 ALADDIN_TOKEN 注入，不要自行传 --token。",
+		"",
+		"完成并自检通过后：",
+		"  aladdin openapi issue update-status --id " + issueID +
+			" --status completed --reason \"做了什么、怎么验证的\"",
+		"卡住、需要用户决策：",
+		"  aladdin openapi issue update-status --id " + issueID +
+			" --status blocked --reason \"卡在哪、需要什么\"",
+		"无法继续且不是阻塞问题：",
+		"  aladdin openapi issue update-status --id " + issueID +
+			" --status failed --reason \"失败原因\"",
+		"需要用户补充信息时，也可以先发结构化提问：",
+		"  aladdin openapi issue input request --message \"你的问题\"",
+		"",
+		"只有真正完成并验证过才上报 completed；没做完就如实上报 blocked/failed。",
+	}, "\n")
 }
 
 func commitMessage(params stepParams) string {
