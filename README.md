@@ -1,7 +1,7 @@
 # 阿拉丁（Aladdin）
 
-多 Agent 研发交付平台：控制面负责计划、状态机、锁与事件；执行面以 daemon 连接
-ACP Agent 执行任务；冷数据在 MySQL，可推导热状态在 Redis。
+多 Agent 研发交付平台：一个 Issue 由 Agent 在长会话里自主推进，状态由 Agent 通过
+平台 CLI 上报；控制面负责派发、会话、事件与产物；冷数据在 MySQL。
 
 > 设计与接口契约以 [`dev_spec.md`](dev_spec.md) 为准。
 
@@ -10,18 +10,19 @@ ACP Agent 执行任务；冷数据在 MySQL，可推导热状态在 Redis。
 ```
 Web / CLI / API
       │
-   Server（Go）── MySQL（任务/计划/尝试/事件/上下文）
-      │            Redis（锁/租约/背压/未确认消息）
+   Server（Go）── MySQL（Issue/执行轮次/会话/事件/产物）
+      │            Redis（小队任务锁/背压）
       │ WS v2.0（命令/响应/事件/流）
    Daemon（Go）── ACP Agent（Claude Code 等）
 ```
 
-- **主路径已打通**：注册机器 → 配置 Agent → 创建 Issue → 确认/启动 → 真实 Claude Code
-  修改仓库 → 自动 commit/push → 生成 GitHub PR（详见 `docs/evidence/MAIN-PATH/`）
-- 计划执行：`pending → plan_confirming → executing → chatting/paused/cancelled/failed`
-- `completed` 表示“执行完成”，不等于“验收成功”
-- 派发幂等：`execution_id` + daemon 命令去重；尝试围栏用 `attempt_no`
-- 热状态全部可从 MySQL 推导；锁永不重建
+- **主路径已打通**：注册机器 → 配置 Agent → 创建 Issue → 开始 → 真实 Claude Code
+  在长会话里推进 → 自动 commit/push → 生成 GitHub PR（详见 `docs/evidence/MAIN-PATH/`）
+- 状态：`pending → executing → paused/completed/cancelled/failed`，由 Agent 调用
+  `aladdin openapi issue update-status` 决定，平台不替 Agent 判定完成
+- 一个 Issue 一个会话：每轮派发携带 `acp_session_id`，daemon 用 `session/load` 续上上下文
+- 派发幂等：`execution_id` + daemon 命令去重；一轮执行一条 `issue_runs` 记录
+- 设计取舍见 [`docs/adr/0004-agent-driven-issue.md`](docs/adr/0004-agent-driven-issue.md)
 
 ## 快速启动
 

@@ -33,8 +33,12 @@
 
 ## 后果
 
-- 本轮（CLI 闭环）保留旧的计划链路以便回滚：`PlanRunner` 仍会派发 step，只是任务状态可能
-  先被 Agent 改成 `completed`，`PlanRunner` 因 `status != executing` 自行停止派发。
-- 下一步是删除 `plans/plan_steps/attempts`、`PlanRunner/Retry/Reconcile/Watchdog` 与前端计划
-  表单，把派发改成「一个 Issue 一个长会话」；届时 `issue plan/step` 是否保留需要重新评估。
-- 「Agent 一轮跑完但没上报」时平台不做任何动作（保持进行中），由用户或下一轮对话驱动。
+- 计划链路已删除：`plans/plan_steps/attempts/step_dependencies/confirmations`、
+  `PlanRunner/Retry/Reconcile/Watchdog`、前端计划表单与 `/plans/*` 端点全部移除；
+  `internal/orchestration` 只剩小队部分（移至 `internal/squadrunner`）。
+- 一轮执行记一条 `issue_runs`：`start_issue_turn` 派发，`turn_done/turn_fail` 收尾；
+  会话行（`sessions.kind='issue'`）保存 `acp_session_id`，下一轮用 `session/load` 续上。
+- 「Agent 一轮跑完但没上报」时平台不做任何动作（保持进行中），由用户或下一轮对话驱动；
+  派发失败会回滚状态并记录 `turn.failed`，避免平台谎报在执行。
+- 产物归属改到执行轮次（`artifacts.run_id`）；小队模式的规划/协作会话与 `issue plan/step`
+  子命令留待后续评估。

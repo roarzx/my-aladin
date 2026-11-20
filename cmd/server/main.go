@@ -24,18 +24,15 @@ import (
 	"github.com/roarzx/my-aladin/internal/auth"
 	"github.com/roarzx/my-aladin/internal/buildinfo"
 	"github.com/roarzx/my-aladin/internal/config"
-	"github.com/roarzx/my-aladin/internal/domain"
 	"github.com/roarzx/my-aladin/internal/flow"
 	"github.com/roarzx/my-aladin/internal/health"
 	"github.com/roarzx/my-aladin/internal/httpapi"
 	"github.com/roarzx/my-aladin/internal/machine"
 	"github.com/roarzx/my-aladin/internal/observability"
-	"github.com/roarzx/my-aladin/internal/orchestration"
-	"github.com/roarzx/my-aladin/internal/plan"
-	"github.com/roarzx/my-aladin/internal/recovery"
+	"github.com/roarzx/my-aladin/internal/issue"
 	"github.com/roarzx/my-aladin/internal/session"
+	"github.com/roarzx/my-aladin/internal/squadrunner"
 	mysqlstore "github.com/roarzx/my-aladin/internal/store/mysql"
-	redisstore "github.com/roarzx/my-aladin/internal/store/redis"
 	"github.com/roarzx/my-aladin/internal/task"
 	"github.com/roarzx/my-aladin/internal/transport/ws"
 	"github.com/roarzx/my-aladin/migrations"
@@ -122,66 +119,28 @@ func run(cfgPath string) error {
 	}
 
 	hub := ws.NewHub(slog.Default())
-	lease := &orchestration.Lease{
-		DB:    db,
-		Store: redisstore.NewLeaseStore(rdb),
-		TTL:   cfg.Scheduler.AttemptLeaseTTL.Std(),
-		Log:   slog.Default(),
-	}
-	taskLock := orchestration.NewTaskLock(rdb,
+	taskLock := squadrunner.NewTaskLock(rdb,
 		cfg.Scheduler.TaskLockTTL.Std(), cfg.Scheduler.TaskLockRenew.Std())
-	runner := &orchestration.PlanRunner{
-		DB: db, Runtime: hub, Owner: "server",
-		Lock:  taskLock,
-		Lease: lease,
-		Log:   slog.Default(),
-	}
-	eventHandler := &orchestration.EventHandler{DB: db, Runner: runner, Log: slog.Default()}
-	hub.OnEvent = eventHandler.Handle
-	hub.Lease = lease
-	canceller := &orchestration.Canceller{DB: db, Runtime: hub, Log: slog.Default()}
-	reconciler := &recovery.Reconciler{DB: db, Handlers: eventHandler}
 
 	taskService := &task.Service{DB: db}
 	sessionService := &session.Service{DB: db, Dispatcher: hub}
-	squadRunner := &orchestration.SquadRunner{
+	squadRunner := &squadrunner.SquadRunner{
 		DB: db, Sessions: sessionService, Lock: taskLock,
 		Owner: "server-squad", Log: slog.Default(),
 	}
-	compositeRunner := &orchestration.CompositeRunner{
-		DB: db, Plan: runner, Squad: squadRunner,
+	issueService := &issue.Service{DB: db, Runtime: hub, Log: slog.Default()}
+	issueHandler := &issue.Handler{
+		DB: db, Members: &mysqlstore.WorkspaceStore{DB: db}, Service: issueService,
 	}
-	taskService.OnCreated = func(ctx context.Context, created *domain.Task) {
-		if err := sessionService.DispatchPlanning(ctx, created.ID, ""); err != nil {
-			slog.Warn("创建规划会话失败", "task", created.ID, "err", err)
-		}
-	}
-	planService := &plan.Service{DB: db}
-	retryService := &orchestration.RetryService{
-		DB: db, Runtime: hub, MaxAttempts: cfg.Scheduler.MaxAttemptsPerStep, Lease: lease,
-	}
-	retryHandler := &orchestration.Handler{
-		DB: db, Members: &mysqlstore.WorkspaceStore{DB: db}, Service: retryService,
-	}
+	hub.OnEvent = (&issue.EventHandler{Service: issueService, Log: slog.Default()}).Handle
+
 	activityHandler := &activity.Handler{DB: db, Members: &mysqlstore.WorkspaceStore{DB: db}}
 	taskHandler := &task.Handler{Service: taskService, DB: db, Members: &mysqlstore.WorkspaceStore{DB: db}}
-	cancelHandler := &orchestration.CancelHandler{
-		Members: &mysqlstore.WorkspaceStore{DB: db}, Canceller: canceller,
-	}
-	reconcileHandler := &recovery.Handler{
-		DB: db, Members: &mysqlstore.WorkspaceStore{DB: db}, Reconciler: reconciler,
-	}
 	artifactService := &artifact.Service{
 		DB: db, Root: cfg.Storage.ArtifactRoot, Log: slog.Default(),
 	}
 	artifactHandler := &artifact.Handler{
 		Service: artifactService, DB: db, Members: &mysqlstore.WorkspaceStore{DB: db},
-	}
-
-	planHandler := &plan.Handler{
-		DB:      db,
-		Members: &mysqlstore.WorkspaceStore{DB: db},
-		Service: planService,
 	}
 
 	machineAuthenticator := func(req *http.Request) (string, error) {
@@ -252,14 +211,10 @@ func run(cfgPath string) error {
 			}).Mount(r)
 			r.Get("/issues", taskHandler.List)
 			r.Get("/issues/{id}", taskHandler.Get)
-			r.Get("/issues/{id}/plans/{rev}", planHandler.Get)
-			r.Post("/issues/{id}/plans", planHandler.Submit)
-			r.Post("/issues/{id}/messages", planHandler.Message)
-			r.Post("/issues/{id}/cancel", cancelHandler.Cancel)
-			r.Post("/steps/{id}/reconcile", reconcileHandler.Reconcile)
-			r.Post("/plans/{id}/confirm", planHandler.Confirm)
-			r.Post("/issues/{id}/start", planHandler.Start)
-			r.Post("/steps/{id}/retry", retryHandler.Retry)
+			r.Post("/issues/{id}/start", issueHandler.Start)
+			r.Post("/issues/{id}/messages", issueHandler.Message)
+			r.Post("/issues/{id}/cancel", issueHandler.Cancel)
+			r.Get("/issues/{id}/runs", issueHandler.Runs)
 			r.Get("/issues/{id}/events", activityHandler.List)
 			r.Get("/issues/{id}/artifacts", artifactHandler.List)
 			r.Get("/issues/{id}/artifacts/{artifactId}/content", artifactHandler.Download)
@@ -272,13 +227,7 @@ func run(cfgPath string) error {
 
 	loopCtx, cancelLoop := context.WithCancel(context.Background())
 	defer cancelLoop()
-	go (&orchestration.Loop{DB: db, Runner: compositeRunner, Interval: time.Second, Log: slog.Default()}).Run(loopCtx)
-	go (&recovery.Watchdog{
-		DB: db, Runner: compositeRunner, Lease: lease, Canceller: canceller,
-		CancelTimeout: cfg.Scheduler.CancelTimeout.Std(),
-		Interval:      cfg.Scheduler.RecoveryScanInterval.Std(),
-		Log:           slog.Default(),
-	}).Run(loopCtx)
+	go (&squadrunner.Loop{DB: db, Runner: squadRunner, Interval: time.Second, Log: slog.Default()}).Run(loopCtx)
 
 	srv := &http.Server{
 		Addr:              cfg.Server.HTTPAddr,

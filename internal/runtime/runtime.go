@@ -1,55 +1,32 @@
-// Package runtime 定义控制面视角的执行通道（dev_spec 5.5）。
+// Package runtime 定义控制面视角的执行通道。
 //
-// 真实实现是 WS 传输层，测试实现是 internal/testkit/fakeruntime。
+// 新模型里一个 Issue 由 Agent 在长会话中自主推进：控制面只负责把一条消息
+// 交给 Agent 并收集回执，不再有步骤、尝试与租约。
 package runtime
 
 import "context"
 
-// DispatchRequest 是一次派发请求；ExecutionID 由服务端在派发前固定。
+// DispatchRequest 是一次「开始一轮」的请求。
 type DispatchRequest struct {
 	ExecutionID string
 	MachineID   string
-	TaskID      string
-	StepID      string
-	// AgentID 是执行本步骤的 Agent（注入给平台 CLI 作为身份）。
-	AgentID   string
-	AttemptNo uint32
-	// LeaseEpoch 是本次尝试的执行租约代次（心跳续约时校验）。
-	LeaseEpoch uint64
-	Branch     string
-	Prompt     string
+	// IssueID 是任务（Issue）ID，Agent 用它调用平台 CLI。
+	IssueID string
+	AgentID string
+	// SessionID 是服务端会话行 ID；ACPSessionID 非空时表示可复用上一轮会话。
+	SessionID    string
+	ACPSessionID string
+	Prompt       string
+	SystemPrompt string
 	// WorkDir 是 Agent 在机器上的工作目录（绝对路径）。
 	WorkDir string
 	// RepoURL 是任务绑定的仓库地址，可为空。
 	RepoURL string
 	// RepoDefaultBranch 是仓库默认分支，如 main。
 	RepoDefaultBranch string
-	// SystemPrompt 是 Agent 的系统提示词。
-	SystemPrompt string
-	// TaskTitle 是任务名称。
-	TaskTitle string
-	// StepTitle 是当前步骤标题。
-	StepTitle string
-}
-
-// ExecutionState 是执行快照状态。
-type ExecutionState string
-
-const (
-	StateDispatched ExecutionState = "dispatched"
-	StateRunning    ExecutionState = "running"
-	StateCompleted  ExecutionState = "completed"
-	StateFailed     ExecutionState = "failed"
-	StateCancelled  ExecutionState = "cancelled"
-	StateUnknown    ExecutionState = "unknown"
-)
-
-// ExecutionSnapshot 是 Inspect 的返回值。
-type ExecutionSnapshot struct {
-	ExecutionID string
-	State       ExecutionState
-	ErrorClass  string
-	Detail      string
+	// Branch 是本 Issue 的工作分支，可为空。
+	Branch     string
+	IssueTitle string
 }
 
 // CapabilitySet 描述执行侧能力；能力缺失时必须显式报错。
@@ -62,7 +39,6 @@ type CapabilitySet struct {
 // Runtime 是控制面 → 执行面的唯一通道。
 type Runtime interface {
 	Dispatch(ctx context.Context, req DispatchRequest) (executionID string, err error)
-	Inspect(ctx context.Context, executionID string) (ExecutionSnapshot, error)
 	Cancel(ctx context.Context, executionID string) (acknowledged bool, err error)
 	Capabilities() CapabilitySet
 }

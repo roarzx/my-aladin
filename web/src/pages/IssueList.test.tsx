@@ -12,7 +12,7 @@ const tasks = [
     workspaceId: 'ws-1',
     name: '演示任务',
     mode: 'ordinary',
-    status: 'chatting',
+    status: 'executing',
     version: 3,
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
@@ -46,7 +46,7 @@ describe('IssueList', () => {
 
     const link = await screen.findByRole('link', { name: /演示任务/ })
     expect(link).toHaveAttribute('href', '/task/detail?id=task-1')
-    expect(within(link).getByText('对话中')).toBeInTheDocument()
+    expect(within(link).getByText('执行中')).toBeInTheDocument()
   })
 
   it('看板四列在空列表时展示占位', async () => {

@@ -107,7 +107,7 @@ func (e Envelope) IsExecutionClass() bool {
 	}
 }
 
-// Validate 校验信封（B7 验收：未知 type 拒绝；执行类缺 execution_attempt 拒绝）。
+// Validate 校验信封（B7 验收：未知 type 拒绝；执行类缺 execution_id 拒绝）。
 func (e Envelope) Validate() error {
 	if e.Version != Version {
 		return fmt.Errorf("protocol: 不支持的版本 %q（期望 %q）", e.Version, Version)
@@ -126,13 +126,9 @@ func (e Envelope) Validate() error {
 			return fmt.Errorf("protocol: stream 消息缺少 stream 元数据")
 		}
 	}
-	if e.IsExecutionClass() {
-		if e.ExecutionID == "" {
-			return fmt.Errorf("protocol: 执行类消息缺少 execution_id")
-		}
-		if e.ExecutionAttempt == nil {
-			return fmt.Errorf("protocol: 执行类消息缺少 execution_attempt")
-		}
+	// 一轮执行不再有「第几次尝试」，只要求 execution_id 能把回执对上。
+	if e.IsExecutionClass() && e.ExecutionID == "" {
+		return fmt.Errorf("protocol: 执行类消息缺少 execution_id")
 	}
 	return nil
 }

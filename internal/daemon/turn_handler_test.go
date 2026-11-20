@@ -53,8 +53,6 @@ func fakeAgent(t *testing.T) string {
 type recordedEvent struct {
 	kind        string
 	executionID string
-	attempt     uint32
-	stepID      string
 	data        map[string]any
 }
 
@@ -77,20 +75,20 @@ func newRecordingSender() *recordingSender {
 	return &recordingSender{done: make(chan struct{})}
 }
 
-func (s *recordingSender) SendEvent(kind, executionID string, attempt uint32, stepID string, data any) error {
+func (s *recordingSender) SendEvent(kind, executionID string, data any) error {
 	raw, _ := json.Marshal(data)
 	var fields map[string]any
 	_ = json.Unmarshal(raw, &fields)
 	s.mu.Lock()
-	s.events = append(s.events, recordedEvent{kind: kind, executionID: executionID, attempt: attempt, stepID: stepID, data: fields})
+	s.events = append(s.events, recordedEvent{kind: kind, executionID: executionID, data: fields})
 	s.mu.Unlock()
-	if kind == "step_done" || kind == "step_fail" {
+	if kind == "turn_done" || kind == "turn_fail" {
 		s.once.Do(func() { close(s.done) })
 	}
 	return nil
 }
 
-func (s *recordingSender) SendStream(executionID string, attempt uint32, stepID string, seq uint64, delta string, final bool) error {
+func (s *recordingSender) SendStream(executionID string, seq uint64, delta string, final bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.streams = append(s.streams, recordedStream{executionID: executionID, seq: seq, delta: delta, final: final})
@@ -112,20 +110,20 @@ func (s *recordingSender) lastEvent() recordedEvent {
 	return s.events[len(s.events)-1]
 }
 
-func startEnvelope(t *testing.T, params stepParams) protocol.Envelope {
+func startEnvelope(t *testing.T, params turnParams) protocol.Envelope {
 	t.Helper()
 	raw, err := json.Marshal(params)
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload, err := json.Marshal(protocol.CommandPayload{Method: "start_step_session", Params: raw})
+	payload, err := json.Marshal(protocol.CommandPayload{Method: "start_issue_turn", Params: raw})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return protocol.Envelope{Type: protocol.TypeCommand, Payload: payload}
 }
 
-func newTestStepHandler(t *testing.T, mode string) *StepHandler {
+func newTestTurnHandler(t *testing.T, mode string) *TurnHandler {
 	t.Helper()
 	cfg := acp.Config{
 		Bin:               fakeAgent(t),
@@ -137,15 +135,15 @@ func newTestStepHandler(t *testing.T, mode string) *StepHandler {
 	if mode != "" {
 		cfg.Env = []string{"FAKE_ACP_MODE=" + mode}
 	}
-	return &StepHandler{ProviderConfig: cfg, Spawner: acp.DefaultSpawner{}}
+	return &TurnHandler{ProviderConfig: cfg, Spawner: acp.DefaultSpawner{}}
 }
 
-func TestStepHandlerRunsACPAndReportsDone(t *testing.T) {
-	h := newTestStepHandler(t, "")
+func TestTurnHandlerRunsACPAndReportsDone(t *testing.T) {
+	h := newTestTurnHandler(t, "")
 	sender := newRecordingSender()
-	params := stepParams{
-		ExecutionID: "exec-1", TaskID: "task-1", StepID: "step-1",
-		AttemptNo: 1, Branch: "aladdin/x", Prompt: "hi",
+	params := turnParams{
+		ExecutionID: "exec-1", IssueID: "task-1",
+		Branch: "aladdin/x", Prompt: "hi",
 	}
 	out, err := h.Handle(WithSender(context.Background(), sender), startEnvelope(t, params))
 	if err != nil || !out.Accepted {
@@ -155,7 +153,7 @@ func TestStepHandlerRunsACPAndReportsDone(t *testing.T) {
 	sender.wait(t)
 
 	last := sender.lastEvent()
-	if last.kind != "step_done" || last.executionID != "exec-1" || last.attempt != 1 || last.stepID != "step-1" {
+	if last.kind != "turn_done" || last.executionID != "exec-1" {
 		t.Fatalf("终态事件 = %+v", last)
 	}
 	if last.data["branch"] != "aladdin/x" {
@@ -182,17 +180,17 @@ func TestStepHandlerRunsACPAndReportsDone(t *testing.T) {
 	}
 }
 
-func TestStepHandlerReportsFailOnStartError(t *testing.T) {
-	h := newTestStepHandler(t, "fail_init")
+func TestTurnHandlerReportsFailOnStartError(t *testing.T) {
+	h := newTestTurnHandler(t, "fail_init")
 	sender := newRecordingSender()
-	params := stepParams{ExecutionID: "exec-2", StepID: "step-2", AttemptNo: 1, Prompt: "hi"}
+	params := turnParams{ExecutionID: "exec-2", Prompt: "hi"}
 	if _, err := h.Handle(WithSender(context.Background(), sender), startEnvelope(t, params)); err != nil {
 		t.Fatal(err)
 	}
 
 	sender.wait(t)
 	last := sender.lastEvent()
-	if last.kind != "step_fail" {
+	if last.kind != "turn_fail" {
 		t.Fatalf("终态事件 = %+v", last)
 	}
 	if last.data["error_class"] != "runtime" {
@@ -200,8 +198,8 @@ func TestStepHandlerReportsFailOnStartError(t *testing.T) {
 	}
 }
 
-func TestStepHandlerRejectsUnknownMethod(t *testing.T) {
-	h := newTestStepHandler(t, "")
+func TestTurnHandlerRejectsUnknownMethod(t *testing.T) {
+	h := newTestTurnHandler(t, "")
 	sender := newRecordingSender()
 	payload, _ := json.Marshal(protocol.CommandPayload{Method: "bogus_method"})
 
@@ -214,9 +212,9 @@ func TestStepHandlerRejectsUnknownMethod(t *testing.T) {
 	}
 }
 
-func TestStepHandlerRequiresSender(t *testing.T) {
-	h := newTestStepHandler(t, "")
-	params := stepParams{ExecutionID: "exec-3", StepID: "step-3", AttemptNo: 1, Prompt: "hi"}
+func TestTurnHandlerRequiresSender(t *testing.T) {
+	h := newTestTurnHandler(t, "")
+	params := turnParams{ExecutionID: "exec-3", Prompt: "hi"}
 	out, err := h.Handle(context.Background(), startEnvelope(t, params))
 	if err != nil {
 		t.Fatal(err)
@@ -252,23 +250,23 @@ func (f *fakePRCreator) callCount() int {
 }
 
 // repoParams 构造一个带本地裸仓库的任务步骤。
-func repoParams(origin, workRoot, taskID, branch string) stepParams {
-	return stepParams{
-		ExecutionID: "exec-repo", TaskID: taskID, StepID: "step-repo", AttemptNo: 1,
+func repoParams(origin, workRoot, taskID, branch string) turnParams {
+	return turnParams{
+		ExecutionID: "exec-repo", IssueID: taskID,
 		Branch: branch, Prompt: "实现功能", WorkDir: workRoot,
-		RepoURL: origin, RepoDefaultBranch: "main",
-		SystemPrompt: "你是 Aladdin 编码 Agent。", TaskTitle: "实现登录", StepTitle: "写代码",
+		RepoURL: origin, RepoDefault: "main",
+		SystemPrompt: "你是 Aladdin 编码 Agent。", IssueTitle: "实现登录",
 	}
 }
 
-func TestStepHandlerPreparesRepoAndReportsCommitAndPR(t *testing.T) {
+func TestTurnHandlerPreparesRepoAndReportsCommitAndPR(t *testing.T) {
 	origin := setupOrigin(t)
 	baseSHA := gitCmd(t, origin, "rev-parse", "refs/heads/main")
 	workRoot := t.TempDir()
 	taskID := "task-abcdefgh"
 	branch := "aladdin/" + shortID(taskID)
 
-	h := newTestStepHandler(t, "write_file")
+	h := newTestTurnHandler(t, "write_file")
 	pr := &fakePRCreator{url: "https://github.com/acme/repo/pull/7"}
 	h.PRCreator = pr
 
@@ -280,7 +278,7 @@ func TestStepHandlerPreparesRepoAndReportsCommitAndPR(t *testing.T) {
 	sender.wait(t)
 
 	last := sender.lastEvent()
-	if last.kind != "step_done" {
+	if last.kind != "turn_done" {
 		t.Fatalf("终态事件 = %+v", last)
 	}
 	if last.data["branch"] != branch {
@@ -315,7 +313,7 @@ func TestStepHandlerPreparesRepoAndReportsCommitAndPR(t *testing.T) {
 	gitCmd(t, origin, "rev-parse", "--verify", "refs/heads/"+branch)
 }
 
-func TestStepHandlerFailsOnDirtyWorkspace(t *testing.T) {
+func TestTurnHandlerFailsOnDirtyWorkspace(t *testing.T) {
 	origin := setupOrigin(t)
 	workRoot := t.TempDir()
 	taskID := "task-dirtyxx"
@@ -329,7 +327,7 @@ func TestStepHandlerFailsOnDirtyWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	h := newTestStepHandler(t, "")
+	h := newTestTurnHandler(t, "")
 	pr := &fakePRCreator{url: "https://example.com/pr/1"}
 	h.PRCreator = pr
 	sender := newRecordingSender()
@@ -340,7 +338,7 @@ func TestStepHandlerFailsOnDirtyWorkspace(t *testing.T) {
 	sender.wait(t)
 
 	last := sender.lastEvent()
-	if last.kind != "step_fail" || last.data["error_class"] != "tool" {
+	if last.kind != "turn_fail" || last.data["error_class"] != "tool" {
 		t.Fatalf("终态事件 = %+v", last)
 	}
 	if pr.callCount() != 0 {
@@ -348,13 +346,13 @@ func TestStepHandlerFailsOnDirtyWorkspace(t *testing.T) {
 	}
 }
 
-func TestStepHandlerReportsToolFailWhenPRFails(t *testing.T) {
+func TestTurnHandlerReportsToolFailWhenPRFails(t *testing.T) {
 	origin := setupOrigin(t)
 	workRoot := t.TempDir()
 	taskID := "task-prfail"
 	branch := "aladdin/" + shortID(taskID)
 
-	h := newTestStepHandler(t, "write_file")
+	h := newTestTurnHandler(t, "write_file")
 	h.PRCreator = &fakePRCreator{err: errors.New("gh pr create: boom")}
 	sender := newRecordingSender()
 	if _, err := h.Handle(WithSender(context.Background(), sender),
@@ -364,7 +362,7 @@ func TestStepHandlerReportsToolFailWhenPRFails(t *testing.T) {
 	sender.wait(t)
 
 	last := sender.lastEvent()
-	if last.kind != "step_fail" || last.data["error_class"] != "tool" {
+	if last.kind != "turn_fail" || last.data["error_class"] != "tool" {
 		t.Fatalf("终态事件 = %+v", last)
 	}
 	if reason, _ := last.data["reason"].(string); !strings.Contains(reason, "boom") {
@@ -372,13 +370,13 @@ func TestStepHandlerReportsToolFailWhenPRFails(t *testing.T) {
 	}
 }
 
-func TestStepHandlerNoChangesSkipsPR(t *testing.T) {
+func TestTurnHandlerNoChangesSkipsPR(t *testing.T) {
 	origin := setupOrigin(t)
 	workRoot := t.TempDir()
 	taskID := "task-nochange"
 	branch := "aladdin/" + shortID(taskID)
 
-	h := newTestStepHandler(t, "")
+	h := newTestTurnHandler(t, "")
 	pr := &fakePRCreator{url: "https://example.com/pr/1"}
 	h.PRCreator = pr
 	sender := newRecordingSender()
@@ -389,7 +387,7 @@ func TestStepHandlerNoChangesSkipsPR(t *testing.T) {
 	sender.wait(t)
 
 	last := sender.lastEvent()
-	if last.kind != "step_done" || last.data["pr_url"] != "" {
+	if last.kind != "turn_done" || last.data["pr_url"] != "" {
 		t.Fatalf("终态事件 = %+v", last)
 	}
 	if pr.callCount() != 0 {
@@ -398,19 +396,19 @@ func TestStepHandlerNoChangesSkipsPR(t *testing.T) {
 }
 
 func TestPromptWithSystemPrefix(t *testing.T) {
-	h := &StepHandler{}
-	if got := h.promptWithSystem(stepParams{Prompt: "do"}); got != "do" {
+	h := &TurnHandler{}
+	if got := h.promptWithSystem(turnParams{Prompt: "do"}); got != "do" {
 		t.Fatalf("无 system_prompt 时应保持原样: %q", got)
 	}
-	got := h.promptWithSystem(stepParams{SystemPrompt: "sys", Prompt: "do"})
+	got := h.promptWithSystem(turnParams{SystemPrompt: "sys", Prompt: "do"})
 	if got != "sys\n\ndo" {
 		t.Fatalf("prompt = %q", got)
 	}
 }
 
 func TestPlatformInstructionsAndEnv(t *testing.T) {
-	h := &StepHandler{APIURL: "http://ctl:8080", Token: "tok", CLIPath: "/opt/aladdin"}
-	params := stepParams{TaskID: "issue-1", AgentID: "agent-1", ExecutionID: "exec-1", Prompt: "do"}
+	h := &TurnHandler{APIURL: "http://ctl:8080", Token: "tok", CLIPath: "/opt/aladdin"}
+	params := turnParams{IssueID: "issue-1", AgentID: "agent-1", ExecutionID: "exec-1", Prompt: "do"}
 
 	env := h.platformEnv(params)
 	want := map[string]string{
@@ -439,7 +437,7 @@ func TestPlatformInstructionsAndEnv(t *testing.T) {
 	}
 
 	// 没有配置控制面地址时不注入，也不添加说明。
-	bare := &StepHandler{}
+	bare := &TurnHandler{}
 	if len(bare.platformEnv(params)) != 0 {
 		t.Fatal("未配置 APIURL 时不应注入环境变量")
 	}

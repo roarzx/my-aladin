@@ -66,8 +66,8 @@ func TestMigrateUpDownUp(t *testing.T) {
 	).Scan(&tables); err != nil {
 		t.Fatal(err)
 	}
-	if tables < 30 {
-		t.Fatalf("表数量 = %d，期望 >= 30", tables)
+	if tables < 29 {
+		t.Fatalf("表数量 = %d，期望 >= 29", tables)
 	}
 
 	// 唯一 Planner 必须由数据库强制（9.3 约束 3）

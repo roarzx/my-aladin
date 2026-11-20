@@ -7,12 +7,9 @@ import { Link } from '../router'
 import '../styles/pages-issues.css'
 
 const STATUS_META: Record<TaskStatus, { label: string; tone: TagTone }> = {
-  pending: { label: '待处理', tone: 'pending' },
-  plan_confirming: { label: '待我确认', tone: 'review' },
+  pending: { label: '待开始', tone: 'pending' },
   executing: { label: '执行中', tone: 'running' },
-  paused: { label: '已暂停', tone: 'failed' },
-  cancelling: { label: '取消中', tone: 'queued' },
-  chatting: { label: '对话中', tone: 'running' },
+  paused: { label: '已阻塞', tone: 'paused' },
   completed: { label: '已完成', tone: 'done' },
   cancelled: { label: '已取消', tone: 'cancelled' },
   failed: { label: '已失败', tone: 'failed' },
@@ -28,19 +25,19 @@ const BOARD_GROUPS: Array<{
   {
     key: 'review',
     title: '待处理',
-    desc: '等待处理、补充输入或指定成员确认方案。',
-    statuses: ['pending', 'plan_confirming'],
+    desc: '还没有交给 Agent，或正在等待你补充信息。',
+    statuses: ['pending'],
   },
   {
     key: 'running',
     title: '执行中',
-    desc: 'Agent 正在推进步骤和输出日志。',
-    statuses: ['executing', 'chatting', 'cancelling'],
+    desc: 'Agent 正在长会话里推进，输出实时可见。',
+    statuses: ['executing'],
   },
   {
     key: 'failed',
     title: '异常处理',
-    desc: '失败、超时或资源不可用任务。',
+    desc: 'Agent 上报阻塞、或本轮执行失败的任务。',
     statuses: ['failed', 'paused'],
   },
   {
@@ -52,16 +49,16 @@ const BOARD_GROUPS: Array<{
 ]
 
 type BoardGroupKey = (typeof BOARD_GROUPS)[number]['key']
-type StatusFilter = 'all' | 'need' | 'awaiting_my_confirmation'
+type StatusFilter = 'all' | 'need' | 'blocked'
 
 const FILTERS: Array<{ key: StatusFilter; label: string }> = [
   { key: 'all', label: '全部状态' },
   { key: 'need', label: '待我处理' },
-  { key: 'awaiting_my_confirmation', label: '待我确认' },
+  { key: 'blocked', label: 'Agent 阻塞' },
 ]
 
 /** 「待我处理」近似识别：需要人介入的状态集合。 */
-const NEED_ATTENTION: TaskStatus[] = ['pending', 'plan_confirming', 'paused', 'failed']
+const NEED_ATTENTION: TaskStatus[] = ['pending', 'paused', 'failed']
 
 function boardGroupOf(status: TaskStatus): BoardGroupKey | null {
   const group = BOARD_GROUPS.find((item) => item.statuses.includes(status))
@@ -113,9 +110,7 @@ export default function IssueList() {
   const term = keyword.trim().toLowerCase()
   const filtered = (tasks ?? []).filter((task) => {
     if (statusFilter === 'need' && !NEED_ATTENTION.includes(task.status)) return false
-    if (statusFilter === 'awaiting_my_confirmation' && task.status !== 'plan_confirming') {
-      return false
-    }
+    if (statusFilter === 'blocked' && task.status !== 'paused') return false
     if (startDate || endDate) {
       const day = datePart(task.updatedAt)
       if (startDate && (!day || day < startDate)) return false

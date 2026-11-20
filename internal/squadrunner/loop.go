@@ -1,4 +1,4 @@
-package orchestration
+package squadrunner
 
 import (
 	"context"
@@ -9,6 +9,11 @@ import (
 	"github.com/roarzx/my-aladin/internal/domain"
 	mysqlstore "github.com/roarzx/my-aladin/internal/store/mysql"
 )
+
+// Runner 是 RunOnce 的最小接口。
+type Runner interface {
+	RunOnce(ctx context.Context, taskID string) error
+}
 
 // Loop 周期性推进所有 executing 任务（D8 的驱动者）。
 type Loop struct {

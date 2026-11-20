@@ -69,7 +69,7 @@ func TestExecutionFence(t *testing.T) {
 				Stream: &StreamMeta{ReplyID: "r", Seq: 1}},
 		},
 		{
-			name: "start_step_session 缺 exec",
+			name: "start_issue_turn 缺 exec",
 			env: Envelope{Type: TypeCommand, ID: "1",
 				Payload: mustPayload(t, CommandPayload{Method: "start_step_session"})},
 			wantErr: true,
@@ -101,9 +101,8 @@ func TestExecutionFence(t *testing.T) {
 				Payload: mustPayload(t, EventPayload{Kind: "agent_ready"})},
 		},
 		{
-			name:    "response 带 execution_id 但缺 attempt",
-			env:     Envelope{Type: TypeResponse, ID: "1", ExecutionID: "e"},
-			wantErr: true,
+			name: "response 带 execution_id 不需要 attempt",
+			env:  Envelope{Type: TypeResponse, ID: "1", ExecutionID: "e"},
 		},
 		{
 			name: "普通 response",

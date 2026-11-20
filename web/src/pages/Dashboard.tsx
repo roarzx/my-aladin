@@ -7,19 +7,16 @@ import { Link } from '../router'
 import '../styles/pages-issues.css'
 
 const STATUS_META: Record<TaskStatus, { label: string; tone: TagTone }> = {
-  pending: { label: '待规划', tone: 'pending' },
-  plan_confirming: { label: '待确认计划', tone: 'review' },
+  pending: { label: '待开始', tone: 'pending' },
   executing: { label: '执行中', tone: 'running' },
   paused: { label: '已暂停', tone: 'paused' },
-  cancelling: { label: '取消中', tone: 'queued' },
-  chatting: { label: '对话中', tone: 'review' },
   completed: { label: '已完成', tone: 'done' },
   cancelled: { label: '已取消', tone: 'cancelled' },
   failed: { label: '已失败', tone: 'failed' },
 }
 
 /** 参考站按状态近似识别「待我处理」：计划确认、失败重试、输入请求。 */
-const ATTENTION_STATUSES: TaskStatus[] = ['plan_confirming', 'failed', 'paused']
+const ATTENTION_STATUSES: TaskStatus[] = ['failed', 'paused']
 
 function shortId(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id
@@ -54,7 +51,7 @@ export default function Dashboard() {
 
   const list = tasks ?? []
   const activeCount = list.filter(
-    (task) => task.status === 'executing' || task.status === 'chatting',
+    (task) => task.status === 'executing',
   ).length
   const failedCount = list.filter((task) => task.status === 'failed').length
   const completedCount = list.filter((task) => task.status === 'completed').length

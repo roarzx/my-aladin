@@ -20,18 +20,18 @@ import (
 	"github.com/roarzx/my-aladin/pkg/protocol"
 )
 
-// StepHandler 处理服务端的 start_step_session：拉起 ACP Provider、执行 prompt 并回传结果。
-type StepHandler struct {
+// TurnHandler 处理服务端的 start_issue_turn：复用（或新建）ACP 会话，
+// 把一条消息交给 Agent，执行完回传 turn_done / turn_fail。
+type TurnHandler struct {
 	ProviderConfig acp.Config
 	Spawner        acp.Spawner
 	// PRCreator 覆盖 gh 实现；为空时使用 GHCreator（测试注入用）。
 	PRCreator PRCreator
-	// Running 登记本机执行，供心跳续约与 stop_session 使用（E4/E9）。
+	// Running 登记本机执行，供心跳续约与 stop_session 使用。
 	Running *RunningExecutions
 	// Artifacts 上报产物；为空时跳过（例如未配置 APIURL）。
 	Artifacts ArtifactUploader
-	// APIURL / Token 用于把平台 CLI 需要的上下文注入到 Agent 进程，
-	// 让 Agent 能执行 `aladdin openapi issue update-status ...`。
+	// APIURL / Token 用于把平台 CLI 需要的上下文注入到 Agent 进程。
 	APIURL string
 	Token  string
 	// CLIPath 覆盖包含 aladdin 可执行文件的目录；为空时取 daemon 所在目录。
@@ -39,33 +39,30 @@ type StepHandler struct {
 	Log     *slog.Logger
 }
 
-type stepParams struct {
+type turnParams struct {
 	ExecutionID string `json:"execution_id"`
-	TaskID      string `json:"task_id"`
-	StepID      string `json:"step_id"`
-	// AgentID 是执行本次步骤的 Agent，注入给 CLI 用于身份与归属校验。
-	AgentID    string `json:"agent_id"`
-	AttemptNo  uint32 `json:"attempt_no"`
-	LeaseEpoch uint64 `json:"lease_epoch"`
-	Branch     string `json:"branch"`
-	Prompt     string `json:"prompt"`
-	// 下列字段由控制面在派发时补齐（主路径计划第四节）。
-	WorkDir           string `json:"work_dir"`
-	RepoURL           string `json:"repo_url"`
-	RepoDefaultBranch string `json:"repo_default_branch"`
-	SystemPrompt      string `json:"system_prompt"`
-	TaskTitle         string `json:"task_title"`
-	StepTitle         string `json:"step_title"`
+	IssueID     string `json:"issue_id"`
+	AgentID     string `json:"agent_id"`
+	// SessionID 是服务端会话行 ID；ACPSessionID 非空表示可复用上一轮会话。
+	SessionID    string `json:"session_id"`
+	ACPSessionID string `json:"acp_session_id"`
+	Prompt       string `json:"prompt"`
+	SystemPrompt string `json:"system_prompt"`
+	WorkDir      string `json:"work_dir"`
+	RepoURL      string `json:"repo_url"`
+	RepoDefault  string `json:"repo_default_branch"`
+	Branch       string `json:"branch"`
+	IssueTitle   string `json:"issue_title"`
 }
 
 // Handle 实现 CommandHandler；立即接受，执行在后台进行。
-func (h *StepHandler) Handle(ctx context.Context, env protocol.Envelope) (protocol.ResponsePayload, error) {
+func (h *TurnHandler) Handle(ctx context.Context, env protocol.Envelope) (protocol.ResponsePayload, error) {
 	var command protocol.CommandPayload
 	if err := json.Unmarshal(env.Payload, &command); err != nil {
 		return rejected("invalid_command", "payload 不合法"), nil
 	}
 	switch command.Method {
-	case "start_step_session":
+	case "start_issue_turn":
 		return h.start(ctx, command.Params), nil
 	case "stop_session":
 		var params struct {
@@ -83,8 +80,8 @@ func (h *StepHandler) Handle(ctx context.Context, env protocol.Envelope) (protoc
 	}
 }
 
-func (h *StepHandler) start(ctx context.Context, raw json.RawMessage) protocol.ResponsePayload {
-	var params stepParams
+func (h *TurnHandler) start(ctx context.Context, raw json.RawMessage) protocol.ResponsePayload {
+	var params turnParams
 	if err := json.Unmarshal(raw, &params); err != nil {
 		return rejected("invalid_params", "params 不合法")
 	}
@@ -92,24 +89,19 @@ func (h *StepHandler) start(ctx context.Context, raw json.RawMessage) protocol.R
 	if !ok {
 		return rejected("no_channel", "连接不支持事件回传")
 	}
-	// 防御：派发参数缺 prompt 时拒绝执行，避免空跑后误报成功。
 	if strings.TrimSpace(params.Prompt) == "" {
-		return rejected("invalid_params", "任务提示词为空，拒绝执行")
+		return rejected("invalid_params", "提示词为空，拒绝执行")
 	}
 
 	go h.run(ctx, params, sender)
 	return protocol.ResponsePayload{Accepted: true}
 }
 
-func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender) {
+func (h *TurnHandler) run(ctx context.Context, params turnParams, sender Sender) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if h.Running != nil {
-		epoch := params.LeaseEpoch
-		if epoch == 0 {
-			epoch = 1
-		}
-		unregister := h.Running.Start(params.ExecutionID, epoch, cancel)
+		unregister := h.Running.Start(params.ExecutionID, 1, cancel)
 		defer unregister()
 	}
 
@@ -144,7 +136,8 @@ func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender)
 
 	provider := acp.NewProvider(cfg, h.Spawner, h.log())
 
-	session, err := provider.Start(ctx)
+	// 长会话：优先复用上一轮的 ACP 会话，适配器不支持时退回新会话。
+	session, err := h.openSession(ctx, provider, params.ACPSessionID)
 	if err != nil {
 		h.fail(sender, params, string(errcode.Classify(err)), false, err)
 		return
@@ -154,60 +147,22 @@ func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender)
 	var seq atomic.Uint64
 	digest := sha256.New()
 	runStarted := time.Now()
-	// 工具调用元信息分散在同一 tool_call_id 的多次 update 里：首帧带 title/kind，
-	// 终帧只带 status，必须累积后再上报，否则审计记录里工具名是空的。
-	type toolState struct {
-		startedAt time.Time
-		title     string
-		kind      string
-	}
+	// 工具调用元信息分散在同一 tool_call_id 的多次 update 里：首帧带 title，
+	// 终帧只带 status，必须累积后再上报。
 	tools := make(map[string]*toolState)
 	emitWork := func(kind string, data map[string]any) {
-		data["step_id"] = params.StepID
-		data["attempt_no"] = params.AttemptNo
-		if err := sender.SendEvent("work_event", params.ExecutionID, params.AttemptNo, params.StepID,
+		if err := sender.SendEvent("work_event", params.ExecutionID,
 			map[string]any{"kind": kind, "data": data}); err != nil {
 			h.log().Warn("发送过程事件失败", "kind", kind, "err", err)
 		}
 	}
-	handleTool := func(event agentevent.Event) {
-		if event.ToolCallID == "" {
-			return
-		}
-		state := tools[event.ToolCallID]
-		if state == nil {
-			state = &toolState{startedAt: time.Now()}
-			tools[event.ToolCallID] = state
-		}
-		if event.Title != "" {
-			state.title = event.Title
-		}
-		if event.ToolKind != "" {
-			state.kind = event.ToolKind
-		}
-		status := strings.ToLower(strings.TrimSpace(event.Status))
-		if event.Kind == agentevent.KindToolCall && status != "completed" && status != "failed" {
-			return
-		}
-		if status != "completed" && status != "failed" {
-			return
-		}
-		delete(tools, event.ToolCallID)
-		emitWork("tool.call", map[string]any{
-			"tool_call_id": event.ToolCallID,
-			"title":        state.title,
-			"tool_kind":    state.kind,
-			"status":       status,
-			"duration_ms":  time.Since(state.startedAt).Milliseconds(),
-		})
-	}
 
-	// 汇总本轮助手输出，随 step_done 回传，用于会话页展示「回复」。
+	// 汇总本轮助手输出，随 turn_done 回传，用于会话页展示「回复」。
 	var reply strings.Builder
 	result, err := session.Prompt(ctx, h.promptWithSystem(params), func(event agentevent.Event) {
 		switch event.Kind {
 		case agentevent.KindToolCall, agentevent.KindToolUpdate:
-			handleTool(event)
+			handleTool(tools, emitWork, event)
 			return
 		case agentevent.KindNotice:
 			emitWork("agent.notice", map[string]any{"text": event.Text, "status": "info"})
@@ -223,8 +178,7 @@ func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender)
 				reply.WriteString(event.Text)
 			}
 		}
-		if err := sender.SendStream(params.ExecutionID, params.AttemptNo, params.StepID,
-			seq.Add(1), event.Text, false); err != nil {
+		if err := sender.SendStream(params.ExecutionID, seq.Add(1), event.Text, false); err != nil {
 			h.log().Warn("发送流式内容失败", "err", err)
 		}
 	})
@@ -233,8 +187,7 @@ func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender)
 		return
 	}
 
-	if err := sender.SendStream(params.ExecutionID, params.AttemptNo, params.StepID,
-		seq.Add(1), "", true); err != nil {
+	if err := sender.SendStream(params.ExecutionID, seq.Add(1), "", true); err != nil {
 		h.log().Warn("发送流式结束失败", "err", err)
 	}
 
@@ -250,10 +203,9 @@ func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender)
 				return
 			}
 		}
-		// 产物上传失败不影响步骤结果，只记日志。
+		// 产物上传失败不影响结果，只记日志。
 		h.uploadArtifacts(ctx, params, workDir, runStarted)
-		if err := sender.SendEvent("step_done", params.ExecutionID, params.AttemptNo, params.StepID, map[string]any{
-			"attempt_no":     params.AttemptNo,
+		if err := sender.SendEvent("turn_done", params.ExecutionID, map[string]any{
 			"summary_digest": summaryDigest,
 			"commit_sha":     commitSHA,
 			"branch":         params.Branch,
@@ -262,8 +214,9 @@ func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender)
 			"output_tokens":  result.Usage.OutputTokens,
 			"duration_ms":    time.Since(runStarted).Milliseconds(),
 			"reply":          reply.String(),
+			"acp_session_id": session.ACPID(),
 		}); err != nil {
-			h.log().Warn("发送 step_done 失败", "err", err)
+			h.log().Warn("发送 turn_done 失败", "err", err)
 		}
 	default:
 		h.fail(sender, params, "verification", false,
@@ -271,11 +224,63 @@ func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender)
 	}
 }
 
-// maxReplyBytes 限制随 step_done 回传的助手文本长度（会话展示用）。
+// openSession 复用已有 ACP 会话；没有或不支持时新建。
+func (h *TurnHandler) openSession(ctx context.Context, provider *acp.Provider,
+	acpSessionID string) (*acp.Session, error) {
+	if acpSessionID == "" {
+		return provider.Start(ctx)
+	}
+	session, err := provider.Resume(ctx, acpSessionID)
+	if err == nil {
+		return session, nil
+	}
+	if !errors.Is(err, acp.ErrResumeUnsupported) {
+		h.log().Warn("恢复会话失败，改用新会话", "session", acpSessionID, "err", err)
+	}
+	return provider.Start(ctx)
+}
+
+// toolState 累积一次工具调用的元信息。
+type toolState struct {
+	startedAt time.Time
+	title     string
+	kind      string
+}
+
+// maxReplyBytes 限制随 turn_done 回传的助手文本长度（会话展示用）。
 const maxReplyBytes = 8000
 
+func handleTool(tools map[string]*toolState, emitWork func(string, map[string]any), event agentevent.Event) {
+	if event.ToolCallID == "" {
+		return
+	}
+	state := tools[event.ToolCallID]
+	if state == nil {
+		state = &toolState{startedAt: time.Now()}
+		tools[event.ToolCallID] = state
+	}
+	if event.Title != "" {
+		state.title = event.Title
+	}
+	if event.ToolKind != "" {
+		state.kind = event.ToolKind
+	}
+	status := strings.ToLower(strings.TrimSpace(event.Status))
+	if status != "completed" && status != "failed" {
+		return
+	}
+	delete(tools, event.ToolCallID)
+	emitWork("tool.call", map[string]any{
+		"tool_call_id": event.ToolCallID,
+		"title":        state.title,
+		"tool_kind":    state.kind,
+		"status":       status,
+		"duration_ms":  time.Since(state.startedAt).Milliseconds(),
+	})
+}
+
 // uploadArtifacts 把本次执行期间新增/修改的文件上报给控制面。
-func (h *StepHandler) uploadArtifacts(ctx context.Context, params stepParams, workDir string, since time.Time) {
+func (h *TurnHandler) uploadArtifacts(ctx context.Context, params turnParams, workDir string, since time.Time) {
 	if h.Artifacts == nil || workDir == "" {
 		return
 	}
@@ -287,12 +292,12 @@ func (h *StepHandler) uploadArtifacts(ctx context.Context, params stepParams, wo
 		}
 	}
 	if len(files) > 0 {
-		h.log().Info("产物已上报", "step", params.StepID, "count", len(files))
+		h.log().Info("产物已上报", "issue", params.IssueID, "count", len(files))
 	}
 }
 
-// deliver 提交、推送计划分支并确保 PR 存在；返回 commit_sha 与 pr_url。
-func (h *StepHandler) deliver(ctx context.Context, ws *Workspace, params stepParams) (string, string, error) {
+// deliver 提交、推送分支并确保 PR 存在；返回 commit_sha 与 pr_url。
+func (h *TurnHandler) deliver(ctx context.Context, ws *Workspace, params turnParams) (string, string, error) {
 	changed, err := ws.HasChanges(ctx)
 	if err != nil {
 		return "", "", err
@@ -302,7 +307,7 @@ func (h *StepHandler) deliver(ctx context.Context, ws *Workspace, params stepPar
 		return "", "", err
 	}
 	if !changed {
-		// 本步没有产生改动：不 push、不建 PR（多步计划中后续步骤常见）
+		// 本轮没有产生改动：不 push、不建 PR。
 		return commitSHA, "", nil
 	}
 	commitSHA, err = ws.CommitAll(ctx, commitMessage(params))
@@ -311,7 +316,7 @@ func (h *StepHandler) deliver(ctx context.Context, ws *Workspace, params stepPar
 	}
 
 	if params.Branch == "" {
-		h.log().Warn("缺少计划分支，跳过推送与 PR", "step", params.StepID)
+		h.log().Warn("缺少工作分支，跳过推送与 PR", "issue", params.IssueID)
 		return commitSHA, "", nil
 	}
 	if err := ws.Push(ctx, params.Branch); err != nil {
@@ -328,9 +333,9 @@ func (h *StepHandler) deliver(ctx context.Context, ws *Workspace, params stepPar
 	}
 	prURL, err := creator.EnsurePR(ctx, ws.Dir, PRRequest{
 		RepoURL: params.RepoURL,
-		Base:    params.RepoDefaultBranch,
+		Base:    params.RepoDefault,
 		Head:    params.Branch,
-		Title:   params.TaskTitle,
+		Title:   params.IssueTitle,
 		Body:    prBody(params),
 	})
 	if err != nil {
@@ -343,7 +348,7 @@ func (h *StepHandler) deliver(ctx context.Context, ws *Workspace, params stepPar
 //
 // 有仓库时为 <work_dir>/aladdin/<task 前 8 位>，无仓库时直接用 work_dir；
 // 两者都为空时回落到 Provider 配置的 Cwd（兼容旧调用）。
-func (h *StepHandler) workspaceDir(params stepParams) (string, error) {
+func (h *TurnHandler) workspaceDir(params turnParams) (string, error) {
 	if params.RepoURL == "" {
 		if params.WorkDir == "" {
 			return h.ProviderConfig.Cwd, nil
@@ -359,11 +364,11 @@ func (h *StepHandler) workspaceDir(params stepParams) (string, error) {
 	if !filepath.IsAbs(params.WorkDir) {
 		return "", fmt.Errorf("work_dir 必须是绝对路径: %q", params.WorkDir)
 	}
-	return filepath.Join(params.WorkDir, "aladdin", shortID(params.TaskID)), nil
+	return filepath.Join(params.WorkDir, "aladdin", shortID(params.IssueID)), nil
 }
 
-// promptWithSystem 拼装最终提示词：系统职责 + 步骤正文 + 平台上报说明。
-func (h *StepHandler) promptWithSystem(params stepParams) string {
+// promptWithSystem 拼装最终提示词：系统职责 + 本轮内容 + 平台上报说明。
+func (h *TurnHandler) promptWithSystem(params turnParams) string {
 	parts := make([]string, 0, 3)
 	if params.SystemPrompt != "" {
 		parts = append(parts, params.SystemPrompt)
@@ -379,17 +384,18 @@ func (h *StepHandler) promptWithSystem(params stepParams) string {
 //
 // 未配置 APIURL/Token 时不注入：Agent 没有上报通道，也不该看到一个
 // 调用必然失败的 CLI。
-func (h *StepHandler) platformEnv(params stepParams) []string {
-	if h.APIURL == "" || h.Token == "" || params.TaskID == "" {
+func (h *TurnHandler) platformEnv(params turnParams) []string {
+	if h.APIURL == "" || h.Token == "" || params.IssueID == "" {
 		return nil
 	}
 	env := []string{
 		"ALADDIN_API_URL=" + h.APIURL,
 		"ALADDIN_TOKEN=" + h.Token,
-		"ALADDIN_ISSUE_ID=" + params.TaskID,
-		"ALADDIN_TASK_ID=" + params.TaskID,
+		"ALADDIN_ISSUE_ID=" + params.IssueID,
+		"ALADDIN_TASK_ID=" + params.IssueID,
 		"ALADDIN_AGENT_ID=" + params.AgentID,
 		"ALADDIN_EXECUTION_ID=" + params.ExecutionID,
+		"ALADDIN_SESSION_ID=" + params.SessionID,
 	}
 	if dir := h.cliDir(); dir != "" {
 		env = append(env, "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -398,7 +404,7 @@ func (h *StepHandler) platformEnv(params stepParams) []string {
 }
 
 // cliDir 返回包含 aladdin 可执行文件的目录；找不到时返回空串。
-func (h *StepHandler) cliDir() string {
+func (h *TurnHandler) cliDir() string {
 	if h.CLIPath != "" {
 		return h.CLIPath
 	}
@@ -414,11 +420,11 @@ func (h *StepHandler) cliDir() string {
 }
 
 // platformInstructions 告诉 Agent 唯一的完成通道：CLI 上报。
-func (h *StepHandler) platformInstructions(params stepParams) string {
-	if h.APIURL == "" || h.Token == "" || params.TaskID == "" {
+func (h *TurnHandler) platformInstructions(params turnParams) string {
+	if h.APIURL == "" || h.Token == "" || params.IssueID == "" {
 		return ""
 	}
-	issueID := params.TaskID
+	issueID := params.IssueID
 	return strings.Join([]string{
 		"## 平台上报（必须执行）",
 		"",
@@ -442,23 +448,20 @@ func (h *StepHandler) platformInstructions(params stepParams) string {
 	}, "\n")
 }
 
-func commitMessage(params stepParams) string {
-	title := strings.TrimSpace(params.TaskTitle)
-	if title == "" {
-		title = strings.TrimSpace(params.StepTitle)
-	}
+func commitMessage(params turnParams) string {
+	title := strings.TrimSpace(params.IssueTitle)
 	if title == "" {
 		title = "自动提交"
 	}
 	return "aladdin: " + title
 }
 
-func prBody(params stepParams) string {
+func prBody(params turnParams) string {
 	body := "Aladdin 自动提交"
-	if params.StepTitle != "" {
-		body += "\n\n步骤：" + params.StepTitle
+	if params.IssueTitle != "" {
+		body += "\n\nIssue：" + params.IssueTitle
 	}
-	if params.ExecutionID != "" {
+	if params.IssueID != "" {
 		body += "\n执行：" + params.ExecutionID
 	}
 	return body
@@ -471,19 +474,18 @@ func shortID(id string) string {
 	return id
 }
 
-func (h *StepHandler) fail(sender Sender, params stepParams, class string, uncertain bool, err error) {
-	h.log().Warn("步骤执行失败", "step", params.StepID, "err", err)
-	if sendErr := sender.SendEvent("step_fail", params.ExecutionID, params.AttemptNo, params.StepID, map[string]any{
-		"attempt_no":  params.AttemptNo,
+func (h *TurnHandler) fail(sender Sender, params turnParams, class string, uncertain bool, err error) {
+	h.log().Warn("执行失败", "issue", params.IssueID, "err", err)
+	if sendErr := sender.SendEvent("turn_fail", params.ExecutionID, map[string]any{
 		"reason":      err.Error(),
 		"error_class": class,
 		"uncertain":   uncertain,
 	}); sendErr != nil {
-		h.log().Warn("发送 step_fail 失败", "err", sendErr)
+		h.log().Warn("发送 turn_fail 失败", "err", sendErr)
 	}
 }
 
-func (h *StepHandler) log() *slog.Logger {
+func (h *TurnHandler) log() *slog.Logger {
 	if h.Log != nil {
 		return h.Log
 	}

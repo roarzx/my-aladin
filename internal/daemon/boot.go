@@ -157,7 +157,7 @@ func Run(ctx context.Context, opts Options) error {
 		InputTimeout:           time.Duration(agentRuntime.InputTimeoutSeconds) * time.Second,
 		AutoApprovePermissions: agentRuntime.AutoApprove,
 	}
-	stepHandler := &StepHandler{
+	turnHandler := &TurnHandler{
 		ProviderConfig: providerConfig,
 		Spawner:        reaper,
 		Running:        running,
@@ -165,17 +165,17 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	if cfg.Daemon.APIURL != "" {
 		cli := NewCLIClient(cfg.Daemon.APIURL, token)
-		stepHandler.Artifacts = cli
+		turnHandler.Artifacts = cli
 		// Agent 通过 `aladdin openapi issue ...` 上报状态，需要地址与令牌。
-		stepHandler.APIURL = cfg.Daemon.APIURL
-		stepHandler.Token = token
+		turnHandler.APIURL = cfg.Daemon.APIURL
+		turnHandler.Token = token
 		worker := &FlowNodeWorker{
 			Client: cli, ProviderConfig: providerConfig, Spawner: reaper,
 			Interval: 3 * time.Second, Heartbeat: 10 * time.Second, Log: slog.Default(),
 		}
 		go worker.Run(ctx)
 	}
-	dispatcher := NewDispatcher(idempotent, stepHandler.Handle, slog.Default())
+	dispatcher := NewDispatcher(idempotent, turnHandler.Handle, slog.Default())
 
 	client := NewClient(ClientOptions{
 		ACPURL:            cfg.Daemon.ACPURL,

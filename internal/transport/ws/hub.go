@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/roarzx/my-aladin/internal/idgen"
-	"github.com/roarzx/my-aladin/internal/orchestration"
 	"github.com/roarzx/my-aladin/internal/runtime"
 	"github.com/roarzx/my-aladin/internal/session"
 	"github.com/roarzx/my-aladin/pkg/errcode"
@@ -27,9 +26,14 @@ type Hub struct {
 
 	log *slog.Logger
 	// Lease 用于心跳续约（E4）；为空时忽略心跳中的 active_executions。
-	Lease *orchestration.Lease
-	// OnEvent 处理 daemon 上行的非响应消息（step_done / step_fail 等）。
+	Lease LeaseRenewer
+	// OnEvent 处理 daemon 上行的非响应消息（turn_done / turn_fail 等）。
 	OnEvent func(ctx context.Context, machineID string, env protocol.Envelope) error
+}
+
+// LeaseRenewer 按 execution_id 续约执行租约。
+type LeaseRenewer interface {
+	RenewByExecution(ctx context.Context, executionID string, epoch uint64) error
 }
 
 // NewHub 构造连接注册表。
@@ -92,39 +96,38 @@ func (h *Hub) Dispatch(ctx context.Context, req runtime.DispatchRequest) (string
 	if req.ExecutionID == "" {
 		return "", errors.New("hub: execution_id 必填")
 	}
-	if req.AttemptNo == 0 {
-		return "", errors.New("hub: attempt_no 必填")
+	if req.IssueID == "" {
+		return "", errors.New("hub: issue_id 必填")
+	}
+	if req.Prompt == "" {
+		return "", errors.New("hub: prompt 必填")
 	}
 
 	params, err := json.Marshal(map[string]any{
 		"execution_id":        req.ExecutionID,
-		"task_id":             req.TaskID,
-		"step_id":             req.StepID,
+		"issue_id":            req.IssueID,
 		"agent_id":            req.AgentID,
-		"attempt_no":          req.AttemptNo,
-		"lease_epoch":         req.LeaseEpoch,
-		"branch":              req.Branch,
+		"session_id":          req.SessionID,
+		"acp_session_id":      req.ACPSessionID,
 		"prompt":              req.Prompt,
+		"system_prompt":       req.SystemPrompt,
 		"work_dir":            req.WorkDir,
 		"repo_url":            req.RepoURL,
 		"repo_default_branch": req.RepoDefaultBranch,
-		"system_prompt":       req.SystemPrompt,
-		"task_title":          req.TaskTitle,
-		"step_title":          req.StepTitle,
+		"branch":              req.Branch,
+		"issue_title":         req.IssueTitle,
 	})
 	if err != nil {
 		return "", err
 	}
-	attempt := req.AttemptNo
 	envelope := protocol.Envelope{
-		Type:             protocol.TypeCommand,
-		ID:               idgen.New(),
-		TraceID:          idgen.New(),
-		ExecutionID:      req.ExecutionID,
-		ExecutionAttempt: &attempt,
-		StepID:           req.StepID,
+		Type:        protocol.TypeCommand,
+		ID:          idgen.New(),
+		TraceID:     idgen.New(),
+		ExecutionID: req.ExecutionID,
+		SessionID:   req.SessionID,
 		Payload: mustJSON(protocol.CommandPayload{
-			Method: "start_step_session",
+			Method: "start_issue_turn",
 			Params: params,
 		}),
 	}
@@ -147,7 +150,6 @@ func (h *Hub) Dispatch(ctx context.Context, req runtime.DispatchRequest) (string
 	return req.ExecutionID, nil
 }
 
-// heartbeatData 是 daemon 心跳中与租约相关的字段（9.7）。
 type heartbeatData struct {
 	ActiveExecutions []struct {
 		ExecutionID string `json:"execution_id"`
@@ -155,7 +157,7 @@ type heartbeatData struct {
 	} `json:"active_executions"`
 }
 
-// handleHeartbeat 按 execution_id 续约；epoch 不等于当前代次则拒绝（旧心跳不得恢复资格）。
+// handleHeartbeat 按 execution_id 续约；epoch 不等于当前代次则拒绝。
 func (h *Hub) handleHeartbeat(ctx context.Context, env protocol.Envelope) {
 	if h.Lease == nil || len(env.Payload) == 0 {
 		return
@@ -171,11 +173,6 @@ func (h *Hub) handleHeartbeat(ctx context.Context, env protocol.Envelope) {
 				"epoch", active.LeaseEpoch, "err", err)
 		}
 	}
-}
-
-// Inspect 暂不维护执行快照（由 daemon 侧负责），返回 unknown。
-func (h *Hub) Inspect(context.Context, string) (runtime.ExecutionSnapshot, error) {
-	return runtime.ExecutionSnapshot{State: runtime.StateUnknown}, nil
 }
 
 // Cancel 向执行所在机器发送 stop_session。

@@ -45,19 +45,18 @@ func TestHubDispatchStepSession(t *testing.T) {
 
 	go func() {
 		cmd := <-conn.out
-		if cmd.Type != protocol.TypeCommand || cmd.ExecutionID != "exec-1" ||
-			cmd.ExecutionAttempt == nil || *cmd.ExecutionAttempt != 2 {
+		if cmd.Type != protocol.TypeCommand || cmd.ExecutionID != "exec-1" {
 			t.Errorf("命令信封 = %+v", cmd)
 		}
 		var payload protocol.CommandPayload
-		if err := json.Unmarshal(cmd.Payload, &payload); err != nil || payload.Method != "start_step_session" {
+		if err := json.Unmarshal(cmd.Payload, &payload); err != nil || payload.Method != "start_issue_turn" {
 			t.Errorf("payload = %s, err=%v", cmd.Payload, err)
 		}
 		respond(conn, cmd.ID, true, "", "")
 	}()
 
 	id, err := hub.Dispatch(ctx, runtime.DispatchRequest{
-		ExecutionID: "exec-1", MachineID: "m1", TaskID: "t1", StepID: "s1", AttemptNo: 2,
+		ExecutionID: "exec-1", MachineID: "m1", IssueID: "t1", Prompt: "p",
 	})
 	if err != nil || id != "exec-1" {
 		t.Fatalf("Dispatch = %q, err=%v", id, err)
@@ -77,7 +76,7 @@ func TestHubDispatchRejected(t *testing.T) {
 		respond(conn, cmd.ID, false, "runtime_start_failed", "not running")
 	}()
 	_, err := hub.Dispatch(ctx, runtime.DispatchRequest{
-		ExecutionID: "exec-2", MachineID: "m1", AttemptNo: 1,
+		ExecutionID: "exec-2", MachineID: "m1", IssueID: "t1", Prompt: "p",
 	})
 	e, ok := errcode.As(err)
 	if !ok || e.Code != errcode.RuntimeStartFailed {
@@ -88,7 +87,7 @@ func TestHubDispatchRejected(t *testing.T) {
 func TestHubDispatchOffline(t *testing.T) {
 	hub := NewHub(nil)
 	_, err := hub.Dispatch(context.Background(), runtime.DispatchRequest{
-		ExecutionID: "exec-3", MachineID: "missing", AttemptNo: 1,
+		ExecutionID: "exec-3", MachineID: "missing", IssueID: "t1", Prompt: "p",
 	})
 	if !errors.Is(err, ErrMachineOffline) {
 		t.Fatalf("期望 ErrMachineOffline，实际: %v", err)
@@ -132,7 +131,7 @@ func TestHubCancelUsesExecutionMachine(t *testing.T) {
 		respond(conn, cmd.ID, true, "", "")
 	}()
 	if _, err := hub.Dispatch(ctx, runtime.DispatchRequest{
-		ExecutionID: "exec-4", MachineID: "m1", AttemptNo: 1,
+		ExecutionID: "exec-4", MachineID: "m1", IssueID: "t1", Prompt: "p",
 	}); err != nil {
 		t.Fatal(err)
 	}

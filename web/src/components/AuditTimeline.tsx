@@ -1,36 +1,30 @@
 import { useMemo, useState, type ReactNode } from 'react'
 
-import type { PlanStep, StreamEvent } from '../api/issues'
+import type { StreamEvent } from '../api/issues'
 import { StateDot, StateTag, type TagTone } from './ui'
 
-/** 审计时间线：按步骤分组展示里程碑、工具调用、用量与错误。 */
+/**
+ * 审计时间线：按「一轮执行」分组展示里程碑、工具调用、用量与错误。
+ *
+ * 新模型没有步骤，`run_id` 就是分组键；不属于任何一轮的任务级事件
+ * （创建、状态上报、取消）单独成组。
+ */
 
 const EVENT_LABELS: Record<string, string> = {
   'task.created': '任务已创建',
-  'plan.submitted': '计划已提交',
-  'plan.confirmed': '计划已确认',
-  'step.dispatched': '步骤已派发',
-  'step.done': '步骤已完成',
-  'step.fail': '步骤失败',
-  'step.retried': '步骤已重试',
-  'step.reconciling': '步骤转对账',
+  'turn.started': '开始一轮执行',
+  'turn.done': '本轮结束',
+  'turn.failed': '本轮失败',
+  'turn.cancelled': '本轮已取消',
+  'issue.status': 'Issue 状态变更',
+  'issue.input_requested': 'Agent 请求输入',
   'tool.call': '工具调用',
   'agent.notice': 'Agent 通知',
+  'message.user': '用户消息',
+  'message.assistant': 'Agent 回复',
   'task.cancel_requested': '请求取消',
-  'task.cancelled': '任务已取消',
-  'execution.orphaned': '执行失联',
   'work_item.started': '工作项开始',
   'work_item.blocked': '工作项阻塞',
-}
-
-const STEP_STATUS_META: Record<string, { label: string; tone: TagTone }> = {
-  pending: { label: '待执行', tone: 'pending' },
-  executing: { label: '执行中', tone: 'running' },
-  reconciling: { label: '对账中', tone: 'review' },
-  completed: { label: '已完成', tone: 'done' },
-  failed: { label: '失败', tone: 'failed' },
-  cancelled: { label: '已取消', tone: 'cancelled' },
-  skipped: { label: '已跳过', tone: 'muted' },
 }
 
 type Filter = 'all' | 'tools' | 'errors'
@@ -75,89 +69,53 @@ function formatDuration(ms: number): string {
 interface Group {
   key: string
   title: string
-  ordinal: number | null
-  step?: PlanStep
   events: StreamEvent[]
 }
 
-function buildGroups(events: StreamEvent[], steps: PlanStep[]): Group[] {
-  const byStep = new Map<string, StreamEvent[]>()
-  const taskEvents: StreamEvent[] = []
+function buildGroups(events: StreamEvent[]): Group[] {
+  const byRun = new Map<string, StreamEvent[]>()
+  const topLevel: StreamEvent[] = []
   for (const event of events) {
-    const stepId = text(payloadOf(event).step_id)
-    if (stepId) {
-      const list = byStep.get(stepId) ?? []
+    const runId = text(payloadOf(event).run_id)
+    if (runId) {
+      const list = byRun.get(runId) ?? []
       list.push(event)
-      byStep.set(stepId, list)
+      byRun.set(runId, list)
     } else {
-      taskEvents.push(event)
+      topLevel.push(event)
     }
   }
 
   const groups: Group[] = []
-  if (taskEvents.length > 0) {
-    groups.push({ key: '__task__', title: '任务', ordinal: null, events: taskEvents })
+  let index = 0
+  for (const [runId, list] of byRun) {
+    index += 1
+    groups.push({ key: runId, title: `第 ${index} 轮执行`, events: list })
   }
-  const known = new Set<string>()
-  for (const step of steps) {
-    known.add(step.id)
-    const list = byStep.get(step.id)
-    if (list && list.length > 0) {
-      groups.push({
-        key: step.id,
-        title: `${step.ordinal}. ${step.title}`,
-        ordinal: step.ordinal,
-        step,
-        events: list,
-      })
-    }
-  }
-  for (const [stepId, list] of byStep) {
-    if (known.has(stepId)) continue
-    groups.push({
-      key: stepId,
-      title: `步骤 ${stepId.slice(0, 8)}`,
-      ordinal: null,
-      events: list,
-    })
+  if (topLevel.length > 0) {
+    groups.push({ key: '__top__', title: '任务', events: topLevel })
   }
   return groups
 }
 
-function groupStatus(group: Group): { label: string; tone: TagTone; running: boolean } {
-  if (group.step) {
-    const meta = STEP_STATUS_META[group.step.status] ?? { label: group.step.status, tone: 'muted' as TagTone }
-    return { label: meta.label, tone: meta.tone, running: group.step.status === 'executing' }
-  }
-  const failed = group.events.some((event) => event.kind === 'step.fail' || event.kind === 'tool.call' && text(payloadOf(event).status) === 'failed')
-  if (failed) return { label: '有错误', tone: 'failed', running: false }
-  return { label: '记录', tone: 'muted', running: false }
-}
-
-function groupDuration(group: Group): number {
-  const dispatched = group.events.find((event) => event.kind === 'step.dispatched')
-  const finished = group.events.find(
-    (event) => event.kind === 'step.done' || event.kind === 'step.fail',
-  )
-  if (!dispatched || !finished) return 0
-  const start = new Date(dispatched.createdAt).getTime()
-  const end = new Date(finished.createdAt).getTime()
-  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return 0
-  return end - start
-}
-
 function eventTone(event: StreamEvent): TagTone {
   const payload = payloadOf(event)
-  if (event.kind === 'step.fail') return 'failed'
-  if (event.kind === 'step.reconciling') return 'review'
-  if (event.kind === 'step.done') return 'done'
+  if (event.kind === 'turn.failed') return 'failed'
+  if (event.kind === 'turn.done') return 'done'
+  if (event.kind === 'turn.cancelled') return 'cancelled'
   if (event.kind === 'tool.call') {
     const status = text(payload.status)
     if (status === 'failed') return 'failed'
     if (status === 'completed') return 'done'
     return 'running'
   }
-  if (event.kind === 'task.cancelled') return 'cancelled'
+  if (event.kind === 'issue.status') {
+    const to = text(payload.to)
+    if (to === 'cancelled') return 'cancelled'
+    if (to === 'failed') return 'failed'
+    if (to === 'completed') return 'done'
+    return 'review'
+  }
   if (event.kind === 'agent.notice') return 'paused'
   return 'muted'
 }
@@ -183,7 +141,7 @@ function eventDetail(event: StreamEvent): ReactNode {
       if (status) parts.push(status === 'failed' ? '失败' : status === 'completed' ? '成功' : status)
       return parts.join(' · ')
     }
-    case 'step.fail': {
+    case 'turn.failed': {
       const reason = text(payload.reason)
       const errorClass = text(payload.error_class)
       return (
@@ -193,7 +151,7 @@ function eventDetail(event: StreamEvent): ReactNode {
         </>
       )
     }
-    case 'step.done': {
+    case 'turn.done': {
       const input = num(payload.input_tokens)
       const output = num(payload.output_tokens)
       const duration = num(payload.duration_ms)
@@ -202,7 +160,9 @@ function eventDetail(event: StreamEvent): ReactNode {
       return (
         <>
           {input || output ? (
-            <span className="audit-chip">tokens {input} / {output}</span>
+            <span className="audit-chip">
+              tokens {input} / {output}
+            </span>
           ) : null}
           {duration ? <span className="audit-chip">{formatDuration(duration)}</span> : null}
           {commit ? <span className="mono-snippet">commit {commit.slice(0, 8)}</span> : null}
@@ -214,12 +174,17 @@ function eventDetail(event: StreamEvent): ReactNode {
         </>
       )
     }
-    case 'step.dispatched':
-      return text(payload.attempt_no) ? `第 ${text(payload.attempt_no)} 次尝试` : ''
-    case 'step.retried':
-      return text(payload.attempt_no) ? `第 ${text(payload.attempt_no)} 次尝试` : ''
-    case 'plan.submitted':
-      return text(payload.revision) ? `r${text(payload.revision)}` : ''
+    case 'issue.status': {
+      const from = text(payload.from)
+      const to = text(payload.to)
+      const reason = text(payload.reason)
+      return (
+        <>
+          {from && to ? <span className="audit-chip">{from} → {to}</span> : null}
+          {reason ? <span className="audit-reason">{reason}</span> : null}
+        </>
+      )
+    }
     case 'task.created':
       return text(payload.mode) ? `模式 ${text(payload.mode)}` : ''
     case 'agent.notice':
@@ -232,26 +197,27 @@ function eventDetail(event: StreamEvent): ReactNode {
 function matchesFilter(event: StreamEvent, filter: Filter): boolean {
   if (filter === 'all') return true
   if (filter === 'tools') return event.kind === 'tool.call'
-  const tone = eventTone(event)
-  return tone === 'failed' || event.kind === 'step.reconciling'
+  return eventTone(event) === 'failed'
 }
 
 export interface AuditTimelineProps {
   events: StreamEvent[]
-  steps: PlanStep[]
   connected: boolean
 }
 
-export default function AuditTimeline({ events, steps, connected }: AuditTimelineProps) {
+export default function AuditTimeline({ events, connected }: AuditTimelineProps) {
   const [filter, setFilter] = useState<Filter>('all')
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
 
-  const groups = useMemo(() => buildGroups(events, steps), [events, steps])
+  const groups = useMemo(() => buildGroups(events), [events])
 
   const visibleGroups = useMemo(
     () =>
       groups
-        .map((group) => ({ ...group, events: group.events.filter((event) => matchesFilter(event, filter)) }))
+        .map((group) => ({
+          ...group,
+          events: group.events.filter((event) => matchesFilter(event, filter)),
+        }))
         .filter((group) => group.events.length > 0),
     [groups, filter],
   )
@@ -275,7 +241,6 @@ export default function AuditTimeline({ events, steps, connected }: AuditTimelin
           ))}
         </div>
         <div className="audit-summary">
-          <span>{steps.length} 个步骤</span>
           <span>{totalTools} 次工具调用</span>
           {totalErrors > 0 ? <span className="error">{totalErrors} 个错误</span> : null}
           <span className="stream-state">
@@ -290,12 +255,12 @@ export default function AuditTimeline({ events, steps, connected }: AuditTimelin
       ) : (
         <div className="audit-groups">
           {visibleGroups.map((group) => {
-            const status = groupStatus(group)
-            const duration = formatDuration(groupDuration(group))
             const isCollapsed = collapsed[group.key] === true
             const toolCount = group.events.filter((event) => event.kind === 'tool.call').length
+            const failed = group.events.some((event) => eventTone(event) === 'failed')
+            const tone: TagTone = failed ? 'failed' : 'muted'
             return (
-              <section className={`audit-group ${status.tone}`} key={group.key}>
+              <section className={`audit-group ${tone}`} key={group.key}>
                 <button
                   type="button"
                   className="audit-group-head"
@@ -304,11 +269,12 @@ export default function AuditTimeline({ events, steps, connected }: AuditTimelin
                     setCollapsed((prev) => ({ ...prev, [group.key]: !isCollapsed }))
                   }
                 >
-                  <StateDot tone={status.tone} />
+                  <StateDot tone={tone} />
                   <strong>{group.title}</strong>
-                  <StateTag tone={status.tone}>{status.label}</StateTag>
-                  {duration ? <span className="audit-meta">{duration}</span> : null}
-                  {toolCount > 0 ? <span className="audit-meta">{toolCount} 次工具调用</span> : null}
+                  <StateTag tone={tone}>{failed ? '有错误' : '记录'}</StateTag>
+                  {toolCount > 0 ? (
+                    <span className="audit-meta">{toolCount} 次工具调用</span>
+                  ) : null}
                   <span className={`audit-chevron ${isCollapsed ? '' : 'expanded'}`} aria-hidden>
                     ›
                   </span>
@@ -317,9 +283,13 @@ export default function AuditTimeline({ events, steps, connected }: AuditTimelin
                 {isCollapsed ? null : (
                   <ol className="audit-items">
                     {group.events.map((event) => {
-                      const tone = eventTone(event)
+                      const itemTone = eventTone(event)
                       return (
-                        <li className={`audit-item ${tone}`} key={event.eventId} data-testid={`event-${event.seq}`}>
+                        <li
+                          className={`audit-item ${itemTone}`}
+                          key={event.eventId}
+                          data-testid={`event-${event.seq}`}
+                        >
                           <span className="audit-dot" aria-hidden />
                           <div className="audit-item-main">
                             <div className="audit-item-title">

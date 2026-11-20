@@ -22,11 +22,11 @@ func TestSaveDedupesAndLists(t *testing.T) {
 		_, _ = db.Exec(`DELETE FROM artifacts WHERE task_id = ?`, taskID)
 	})
 
-	first, err := svc.Save(ctx, taskID, "", "", "index.html", "text/html", []byte("<html>hi</html>"))
+	first, err := svc.Save(ctx, taskID, "", "index.html", "text/html", []byte("<html>hi</html>"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := svc.Save(ctx, taskID, "", "", "index.html", "text/html", []byte("<html>hi</html>"))
+	second, err := svc.Save(ctx, taskID, "", "index.html", "text/html", []byte("<html>hi</html>"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestSaveWritesUnderRoot(t *testing.T) {
 		_, _ = db.Exec(`DELETE FROM artifacts WHERE task_id = ?`, taskID)
 	})
 
-	item, err := svc.Save(ctx(), taskID, "", "", "a/b/run.json", "application/json", []byte(`{"ok":true}`))
+	item, err := svc.Save(ctx(), taskID, "", "a/b/run.json", "application/json", []byte(`{"ok":true}`))
 	if err != nil {
 		t.Fatal(err)
 	}

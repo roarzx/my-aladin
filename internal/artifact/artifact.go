@@ -29,8 +29,7 @@ const MaxFileBytes = 16 << 20
 type Artifact struct {
 	ID          string `json:"id"`
 	TaskID      string `json:"taskId"`
-	StepID      string `json:"stepId,omitempty"`
-	AttemptID   string `json:"attemptId,omitempty"`
+	RunID       string `json:"runId,omitempty"`
 	Path        string `json:"path"`
 	SHA256      string `json:"sha256"`
 	SizeBytes   int64  `json:"sizeBytes"`
@@ -52,7 +51,7 @@ func (s *Service) log() *slog.Logger {
 }
 
 // Save 保存一份产物；同一任务下相同路径与内容视为幂等重传。
-func (s *Service) Save(ctx context.Context, taskID, stepID, attemptID, path, contentType string, data []byte) (Artifact, error) {
+func (s *Service) Save(ctx context.Context, taskID, runID, path, contentType string, data []byte) (Artifact, error) {
 	if strings.TrimSpace(taskID) == "" {
 		return Artifact{}, errcode.New(errcode.ValidationFailed, "缺少 task_id")
 	}
@@ -68,10 +67,10 @@ func (s *Service) Save(ctx context.Context, taskID, stepID, attemptID, path, con
 
 	var existing Artifact
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT id, task_id, COALESCE(step_id,''), COALESCE(attempt_id,''), path, sha256, size_bytes, content_type
+		`SELECT id, task_id, COALESCE(run_id,''), path, sha256, size_bytes, content_type
 		   FROM artifacts WHERE task_id = ? AND path = ? AND sha256 = ? LIMIT 1`,
 		taskID, path, digest,
-	).Scan(&existing.ID, &existing.TaskID, &existing.StepID, &existing.AttemptID,
+	).Scan(&existing.ID, &existing.TaskID, &existing.RunID,
 		&existing.Path, &existing.SHA256, &existing.SizeBytes, &existing.ContentType)
 	if err == nil {
 		return existing, nil
@@ -91,16 +90,16 @@ func (s *Service) Save(ctx context.Context, taskID, stepID, attemptID, path, con
 	}
 
 	item := Artifact{
-		ID: idgen.New(), TaskID: taskID, StepID: stepID, AttemptID: attemptID,
+		ID: idgen.New(), TaskID: taskID, RunID: runID,
 		Path: path, SHA256: digest, SizeBytes: int64(len(data)), ContentType: contentType,
 	}
 	if item.ContentType == "" {
 		item.ContentType = "application/octet-stream"
 	}
 	if _, err := s.DB.ExecContext(ctx,
-		`INSERT INTO artifacts (id, task_id, step_id, attempt_id, path, sha256, size_bytes, content_type)
-		 VALUES (?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?)`,
-		item.ID, item.TaskID, item.StepID, item.AttemptID,
+		`INSERT INTO artifacts (id, task_id, run_id, path, sha256, size_bytes, content_type)
+		 VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?)`,
+		item.ID, item.TaskID, item.RunID,
 		item.Path, item.SHA256, item.SizeBytes, item.ContentType,
 	); err != nil {
 		return Artifact{}, err
@@ -111,7 +110,7 @@ func (s *Service) Save(ctx context.Context, taskID, stepID, attemptID, path, con
 // List 返回任务的全部产物（按路径排序）。
 func (s *Service) List(ctx context.Context, taskID string) ([]Artifact, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, task_id, COALESCE(step_id,''), COALESCE(attempt_id,''), path, sha256, size_bytes, content_type
+		`SELECT id, task_id, COALESCE(run_id,''), path, sha256, size_bytes, content_type
 		   FROM artifacts WHERE task_id = ? ORDER BY path, id`, taskID)
 	if err != nil {
 		return nil, err
@@ -121,7 +120,7 @@ func (s *Service) List(ctx context.Context, taskID string) ([]Artifact, error) {
 	out := make([]Artifact, 0)
 	for rows.Next() {
 		var item Artifact
-		if err := rows.Scan(&item.ID, &item.TaskID, &item.StepID, &item.AttemptID,
+		if err := rows.Scan(&item.ID, &item.TaskID, &item.RunID,
 			&item.Path, &item.SHA256, &item.SizeBytes, &item.ContentType); err != nil {
 			return nil, err
 		}
@@ -134,9 +133,9 @@ func (s *Service) List(ctx context.Context, taskID string) ([]Artifact, error) {
 func (s *Service) Get(ctx context.Context, id string) (Artifact, string, error) {
 	var item Artifact
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT id, task_id, COALESCE(step_id,''), COALESCE(attempt_id,''), path, sha256, size_bytes, content_type
+		`SELECT id, task_id, COALESCE(run_id,''), path, sha256, size_bytes, content_type
 		   FROM artifacts WHERE id = ?`, id,
-	).Scan(&item.ID, &item.TaskID, &item.StepID, &item.AttemptID,
+	).Scan(&item.ID, &item.TaskID, &item.RunID,
 		&item.Path, &item.SHA256, &item.SizeBytes, &item.ContentType)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Artifact{}, "", errcode.New(errcode.NotFound, "产物不存在")

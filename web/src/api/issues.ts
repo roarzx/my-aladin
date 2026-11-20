@@ -1,13 +1,19 @@
-export type TaskStatus =
-  | 'pending'
-  | 'plan_confirming'
-  | 'executing'
-  | 'paused'
-  | 'cancelling'
-  | 'chatting'
-  | 'cancelled'
-  | 'failed'
-  | 'completed'
+export type TaskStatus = 'pending' | 'executing' | 'paused' | 'completed' | 'cancelled' | 'failed'
+
+/** 一轮执行：一次把提示词交给 Agent，直到 turn_done / turn_fail。 */
+export interface IssueRun {
+  id: string
+  taskId: string
+  agentId: string
+  sessionId?: string
+  executionId: string
+  status: 'dispatched' | 'running' | 'completed' | 'failed' | 'cancelled'
+  reply?: string
+  errorClass?: string
+  detail?: string
+  createdAt: string
+  updatedAt: string
+}
 
 export interface Task {
   id: string
@@ -20,14 +26,6 @@ export interface Task {
   createdAt: string
   updatedAt: string
   cancelRequestedAt?: string
-}
-
-export interface PlanSummary {
-  id: string
-  revision: number
-  status: string
-  contentHash: string
-  stepCount: number
 }
 
 export interface IssueAgent {
@@ -45,32 +43,10 @@ export interface IssueRepository {
 
 export interface IssueDetail {
   task: Task
-  plan: PlanSummary | null
+  latestRun?: IssueRun | null
   acceptance: unknown
   agents?: IssueAgent[]
   repositories?: IssueRepository[]
-}
-
-export interface PlanStep {
-  id: string
-  ordinal: number
-  title: string
-  body: string
-  agentRef: string
-  status: string
-  version: number
-}
-
-export interface PlanDetail {
-  plan: {
-    id: string
-    revision: number
-    status: string
-    contentHash: string
-    contentMd: string
-    version: number
-  } | null
-  steps: PlanStep[]
 }
 
 export interface StreamEvent {
@@ -160,19 +136,12 @@ export async function downloadArtifact(taskId: string, artifact: Artifact): Prom
   URL.revokeObjectURL(objectUrl)
 }
 
-export interface SendMessageResult {
-  taskId: string
-  planId: string
-  revision: number
-  status: TaskStatus
-}
-
 /**
- * 会话追问：后端会把它追加成一轮执行（新计划版本 + 单步骤），
- * 并自动确认、启动；Agent 的回复随后写入事件流。
+ * 会话追问：后端把消息交给 Agent，形成新一轮执行；
+ * Agent 的回复随后写入事件流（message.assistant）。
  */
-export function sendMessage(taskId: string, content: string): Promise<SendMessageResult> {
-  return request<SendMessageResult>(`/issues/${encodeURIComponent(taskId)}/messages`, {
+export function sendMessage(taskId: string, content: string): Promise<IssueRun> {
+  return request<IssueRun>(`/issues/${encodeURIComponent(taskId)}/messages`, {
     method: 'POST',
     body: JSON.stringify({ content }),
   })
@@ -184,12 +153,6 @@ export function fetchIssues(limit = 50): Promise<Task[]> {
 
 export function fetchIssue(taskId: string): Promise<IssueDetail> {
   return request<IssueDetail>(`/issues/${encodeURIComponent(taskId)}`)
-}
-
-export function fetchPlan(taskId: string, revision: number): Promise<PlanDetail> {
-  return request<PlanDetail>(
-    `/issues/${encodeURIComponent(taskId)}/plans/${revision}?allowMissing=true`,
-  )
 }
 
 /** 事件流端点自带 { data, nextSeq } 包装，不走 request() 的 data 解包。 */
@@ -206,77 +169,21 @@ export async function fetchEvents(taskId: string, after: number): Promise<EventP
   return { events: (body.data ?? []) as StreamEvent[], nextSeq: body.nextSeq ?? after }
 }
 
-export function retryStep(
-  stepId: string,
-  instruction: string,
-  expectedVersion: number,
-): Promise<{ attemptNo: number }> {
-  return request<{ attemptNo: number }>(`/steps/${encodeURIComponent(stepId)}/retry`, {
+export function fetchRuns(taskId: string): Promise<IssueRun[]> {
+  return request<IssueRun[]>(`/issues/${encodeURIComponent(taskId)}/runs`)
+}
+
+/** 开始或继续一轮执行；提示词为空时后端用需求正文。 */
+export function startIssue(taskId: string, prompt = ''): Promise<IssueRun> {
+  return request<IssueRun>(`/issues/${encodeURIComponent(taskId)}/start`, {
     method: 'POST',
-    body: JSON.stringify({ instruction, expectedVersion }),
+    body: JSON.stringify({ prompt }),
   })
 }
 
-export interface PlanStepInput {
-  ordinal: number
-  title: string
-  body: string
-  agentRef: string
-}
-
-export interface PlanProposal {
-  contentMd: string
-  steps: PlanStepInput[]
-}
-
-export function submitPlan(
-  taskId: string,
-  proposal: PlanProposal,
-): Promise<{ planId: string; revision: number; steps: number }> {
-  return request<{ planId: string; revision: number; steps: number }>(
-    `/issues/${encodeURIComponent(taskId)}/plans`,
-    { method: 'POST', body: JSON.stringify(proposal) },
-  )
-}
-
-export function confirmPlan(
-  planId: string,
-  revision: number,
-  contentHash: string,
-): Promise<{ revision: number; confirmedAt: string }> {
-  return request<{ revision: number; confirmedAt: string }>(
-    `/plans/${encodeURIComponent(planId)}/confirm`,
-    { method: 'POST', body: JSON.stringify({ revision, contentHash }) },
-  )
-}
-
-export function startTask(
-  taskId: string,
-  expectedVersion: number,
-): Promise<{ startedAt: string; status: TaskStatus }> {
-  return request<{ startedAt: string; status: TaskStatus }>(
-    `/issues/${encodeURIComponent(taskId)}/start`,
-    { method: 'POST', body: JSON.stringify({ expectedVersion }) },
-  )
-}
-
-export function reconcileStep(
-  stepId: string,
-  verdict: 'completed' | 'failed',
-  evidence = '',
-): Promise<unknown> {
-  return request<unknown>(`/steps/${encodeURIComponent(stepId)}/reconcile`, {
-    method: 'POST',
-    body: JSON.stringify({ verdict, evidence }),
-  })
-}
-
-export function cancelIssue(
-  taskId: string,
-  expectedVersion?: number,
-): Promise<unknown> {
+export function cancelIssue(taskId: string, reason = ''): Promise<unknown> {
   return request<unknown>(`/issues/${encodeURIComponent(taskId)}/cancel`, {
     method: 'POST',
-    body: JSON.stringify(expectedVersion ? { expectedVersion } : {}),
+    body: JSON.stringify({ reason }),
   })
 }

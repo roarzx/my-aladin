@@ -14,12 +14,13 @@ var ErrDispatch = errors.New("fakeruntime: dispatch failed")
 
 // Runtime 是 Runtime 接口的可编排实现。
 type Runtime struct {
-	mu     sync.Mutex
-	script *Script
-	byID   map[string]*ScriptStep
-	next   int
-	states map[string]runtime.ExecutionSnapshot
-	caps   runtime.CapabilitySet
+	mu         sync.Mutex
+	script     *Script
+	byID       map[string]*ScriptStep
+	next       int
+	dispatched []runtime.DispatchRequest
+	cancelled  map[string]bool
+	caps       runtime.CapabilitySet
 
 	// OnEvent 在回放事件时被同步调用，便于测试断言。
 	OnEvent func(Event)
@@ -28,9 +29,9 @@ type Runtime struct {
 // New 构造一个按脚本回放的假 Runtime。
 func New(script *Script) *Runtime {
 	r := &Runtime{
-		script: script,
-		byID:   make(map[string]*ScriptStep),
-		states: make(map[string]runtime.ExecutionSnapshot),
+		script:    script,
+		byID:      make(map[string]*ScriptStep),
+		cancelled: make(map[string]bool),
 	}
 	if script != nil {
 		for i := range script.Steps {
@@ -57,10 +58,12 @@ func (r *Runtime) Capabilities() runtime.CapabilitySet {
 	return r.caps
 }
 
-// Dispatch 按脚本执行；事件回放与状态落定在返回前完成（便于确定性测试）。
+// Dispatch 按脚本回放事件；事件在返回前同步送达（便于确定性测试）。
 func (r *Runtime) Dispatch(_ context.Context, req runtime.DispatchRequest) (string, error) {
 	r.mu.Lock()
+	r.dispatched = append(r.dispatched, req)
 	step := r.pickLocked(req.ExecutionID)
+	callback := r.OnEvent
 	r.mu.Unlock()
 	if step == nil {
 		return "", errors.New("fakeruntime: 没有匹配的脚本")
@@ -68,73 +71,35 @@ func (r *Runtime) Dispatch(_ context.Context, req runtime.DispatchRequest) (stri
 	if step.FailDispatch {
 		return "", ErrDispatch
 	}
-
-	id := req.ExecutionID
-	if id == "" {
-		id = step.ExecutionID
-		if id == "" {
-			id = fmt.Sprintf("fake-exec-%d", r.next)
+	if !step.Hang {
+		for _, ev := range step.Events {
+			delay(ev.DelayMS)
+			if callback != nil {
+				callback(ev)
+			}
 		}
 	}
-
-	r.mu.Lock()
-	r.states[id] = runtime.ExecutionSnapshot{ExecutionID: id, State: runtime.StateRunning}
-	callback := r.OnEvent
-	r.mu.Unlock()
-
-	// 模拟"超时不响应"：保持 running，等待 Cancel 或由调用方超时处理。
-	if step.Hang {
-		return id, nil
-	}
-
-	for _, ev := range step.Events {
-		delay(ev.DelayMS)
-		if callback != nil {
-			callback(ev)
-		}
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.states[id].State == runtime.StateCancelled {
-		return id, nil
-	}
-	if step.Result == "failed" {
-		r.states[id] = runtime.ExecutionSnapshot{
-			ExecutionID: id,
-			State:       runtime.StateFailed,
-			ErrorClass:  step.ErrorClass,
-		}
-		return id, nil
-	}
-	r.states[id] = runtime.ExecutionSnapshot{ExecutionID: id, State: runtime.StateCompleted}
-	return id, nil
+	return req.ExecutionID, nil
 }
 
-// Inspect 返回执行快照。
-func (r *Runtime) Inspect(_ context.Context, executionID string) (runtime.ExecutionSnapshot, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	snap, ok := r.states[executionID]
-	if !ok {
-		return runtime.ExecutionSnapshot{}, fmt.Errorf("fakeruntime: 未知执行 %s", executionID)
-	}
-	return snap, nil
-}
-
-// Cancel 将 running 的执行置为 cancelled。
+// Cancel 把执行标记为已取消。
 func (r *Runtime) Cancel(_ context.Context, executionID string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	snap, ok := r.states[executionID]
-	if !ok {
+	if _, ok := r.byID[executionID]; !ok && r.script != nil && len(r.script.Steps) == 0 {
 		return false, fmt.Errorf("fakeruntime: 未知执行 %s", executionID)
 	}
-	if snap.State != runtime.StateRunning && snap.State != runtime.StateDispatched {
-		return false, nil
-	}
-	r.states[executionID] = runtime.ExecutionSnapshot{ExecutionID: executionID, State: runtime.StateCancelled}
+	r.cancelled[executionID] = true
 	return true, nil
+}
+
+// Dispatched 返回历次派发请求（测试断言用）。
+func (r *Runtime) Dispatched() []runtime.DispatchRequest {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]runtime.DispatchRequest, len(r.dispatched))
+	copy(out, r.dispatched)
+	return out
 }
 
 func (r *Runtime) pickLocked(id string) *ScriptStep {

@@ -2,9 +2,9 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { EventPage, IssueDetail, PlanDetail, PlanStep } from '../api/issues'
+import type { EventPage, IssueDetail, IssueRun } from '../api/issues'
 import { RouterProvider } from '../router'
-import IssueCockpit, { canRetry, type CockpitApi } from './IssueCockpit'
+import IssueCockpit, { type CockpitApi } from './IssueCockpit'
 
 function makeDetail(status: IssueDetail['task']['status'] = 'executing'): IssueDetail {
   return {
@@ -19,35 +19,29 @@ function makeDetail(status: IssueDetail['task']['status'] = 'executing'): IssueD
       createdAt: '2026-01-01T00:00:00Z',
       updatedAt: '2026-01-01T00:00:00Z',
     },
-    plan: { id: 'plan-1', revision: 2, status: 'executing', contentHash: 'h', stepCount: 2 },
+    latestRun: null,
     acceptance: null,
+    agents: [{ ref: 'a1', agentId: 'agent-1', name: 'Claude', role: 'planner' }],
   }
 }
 
-const steps: PlanStep[] = [
-  { id: 'step-1', ordinal: 1, title: '改代码', body: '', agentRef: 'a1', status: 'completed', version: 1 },
-  { id: 'step-2', ordinal: 2, title: '跑测试', body: '', agentRef: 'a2', status: 'failed', version: 4 },
-]
-
-function makePlan(): PlanDetail {
+function makeRun(overrides: Partial<IssueRun> = {}): IssueRun {
   return {
-    plan: {
-      id: 'plan-1',
-      revision: 2,
-      status: 'executing',
-      contentHash: 'h',
-      contentMd: '# plan',
-      version: 2,
-    },
-    steps,
+    id: 'run-1',
+    taskId: 'task-1',
+    agentId: 'agent-1',
+    executionId: 'exec-1',
+    status: 'dispatched',
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    ...overrides,
   }
 }
 
 function makeApi(overrides: Partial<CockpitApi> = {}): CockpitApi {
   return {
     fetchIssue: vi.fn().mockResolvedValue(makeDetail()),
-    fetchPlan: vi.fn().mockResolvedValue(makePlan()),
-    retryStep: vi.fn().mockResolvedValue({ attemptNo: 2 }),
+    fetchArtifacts: vi.fn().mockResolvedValue([]),
     ...overrides,
   }
 }
@@ -71,73 +65,31 @@ function renderCockpit(props: Parameters<typeof IssueCockpit>[0]) {
   )
 }
 
-describe('canRetry', () => {
-  it('只有 failed 步骤显示重试入口', () => {
-    expect(canRetry(steps[1])).toBe(true)
-    expect(canRetry(steps[0])).toBe(false)
-    expect(canRetry({ ...steps[0], status: 'reconciling' })).toBe(false)
-  })
-})
-
 describe('IssueCockpit', () => {
-  it('渲染任务状态、计划步骤与失败恢复入口', async () => {
-    const api = makeApi()
-    renderCockpit({ taskId: 'task-1', api })
+  it('渲染标题与任务状态', async () => {
+    renderCockpit({ taskId: 'task-1', api: makeApi() })
 
     expect(await screen.findByRole('heading', { name: /修复登录/ })).toBeInTheDocument()
     expect(screen.getByTestId('task-status')).toHaveTextContent('执行中')
-    expect(screen.getByTestId('step-status-1')).toHaveTextContent('已完成')
-    expect(screen.getByTestId('step-status-2')).toHaveTextContent('失败')
-    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
-    expect(screen.getByText(/存在 1 个失败步骤/)).toBeInTheDocument()
-    expect(api.fetchPlan).toHaveBeenCalledWith('task-1', 2)
+    expect(screen.getByRole('button', { name: '取消' })).toBeInTheDocument()
   })
 
-  it('执行时间线按 seq 增量合并，重复 eventId 不重复渲染', async () => {
-    const page1: EventPage = {
-      events: [
-        { seq: 1, eventId: 'e1', kind: 'task.created', payload: {}, createdAt: '' },
-        { seq: 2, eventId: 'e2', kind: 'step.dispatched', payload: {}, createdAt: '' },
-      ],
-      nextSeq: 2,
-    }
-    // 重连后服务端重复返回 e2，并携带新的 e4（seq 允许有洞）
-    const page2: EventPage = {
-      events: [
-        { seq: 2, eventId: 'e2', kind: 'step.dispatched', payload: {}, createdAt: '' },
-        { seq: 4, eventId: 'e4', kind: 'step.done', payload: {}, createdAt: '' },
-      ],
-      nextSeq: 4,
-    }
+  it('执行中禁用输入，结束后可继续发消息', async () => {
+    const api = makeApi({ fetchIssue: vi.fn().mockResolvedValue(makeDetail('completed')) })
+    renderCockpit({ taskId: 'task-1', api, eventsFetcher: streamOf([{ events: [], nextSeq: 0 }]) })
 
-    const api = makeApi()
-    const user = userEvent.setup()
-    renderCockpit({
-      taskId: 'task-1',
-      api,
-      eventsFetcher: streamOf([page1, page2]),
-    })
-
-    // 时间线在「记录」标签页内
-    await user.click(await screen.findByRole('tab', { name: '记录' }))
-
-    await screen.findByTestId('event-1')
-    await screen.findByTestId('event-4')
-    expect(screen.getByTestId('event-2')).toBeInTheDocument()
-    expect(screen.queryAllByText(/步骤已派发/)).toHaveLength(1)
+    const input = await screen.findByLabelText('会话输入')
+    expect(input).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: '继续执行' })).toBeInTheDocument()
   })
 
-  it('会话发送追问调用消息接口并刷新', async () => {
+  it('发送消息调用消息接口并刷新', async () => {
     const api = makeApi({
       fetchIssue: vi.fn().mockResolvedValue(makeDetail('completed')),
-      sendMessage: vi.fn().mockResolvedValue({ taskId: 'task-1', planId: 'p', revision: 3, status: 'executing' }),
+      sendMessage: vi.fn().mockResolvedValue(makeRun()),
     })
     const user = userEvent.setup()
-    renderCockpit({
-      taskId: 'task-1',
-      api,
-      eventsFetcher: streamOf([{ events: [], nextSeq: 0 }]),
-    })
+    renderCockpit({ taskId: 'task-1', api, eventsFetcher: streamOf([{ events: [], nextSeq: 0 }]) })
 
     const input = await screen.findByLabelText('会话输入')
     await user.type(input, '写好了吗？')
@@ -149,33 +101,85 @@ describe('IssueCockpit', () => {
     expect(api.fetchIssue).toHaveBeenCalledTimes(2)
   })
 
-  it('展示会话中的人机消息', async () => {
-    const api = makeApi()
+  it('点「开始执行」调用开始接口', async () => {
+    const api = makeApi({
+      fetchIssue: vi.fn().mockResolvedValue(makeDetail('pending')),
+      startIssue: vi.fn().mockResolvedValue(makeRun()),
+    })
+    const user = userEvent.setup()
+    renderCockpit({ taskId: 'task-1', api, eventsFetcher: streamOf([{ events: [], nextSeq: 0 }]) })
+
+    await user.click(await screen.findByRole('button', { name: '开始执行' }))
+    await waitFor(() => expect(api.startIssue).toHaveBeenCalledWith('task-1'))
+  })
+
+  it('展示会话中的人机消息与状态变更', async () => {
     const page: EventPage = {
       events: [
-        { seq: 1, eventId: 'e1', kind: 'plan.submitted', payload: { revision: 2 }, createdAt: '2026-01-01T00:00:00Z' },
-        { seq: 2, eventId: 'e2', kind: 'message.user', payload: { text: '写好了吗？' }, createdAt: '2026-01-01T00:01:00Z' },
-        { seq: 3, eventId: 'e3', kind: 'message.assistant', payload: { text: '已经写好了。' }, createdAt: '2026-01-01T00:02:00Z' },
+        { seq: 1, eventId: 'e1', kind: 'message.user', payload: { text: '写好了吗？' }, createdAt: '2026-01-01T00:01:00Z' },
+        { seq: 2, eventId: 'e2', kind: 'message.assistant', payload: { text: '已经写好了。' }, createdAt: '2026-01-01T00:02:00Z' },
+        {
+          seq: 3,
+          eventId: 'e3',
+          kind: 'issue.status',
+          payload: { from: 'executing', to: 'completed', reason: '验证通过' },
+          createdAt: '2026-01-01T00:03:00Z',
+        },
       ],
       nextSeq: 3,
     }
-    renderCockpit({ taskId: 'task-1', api, eventsFetcher: streamOf([page]) })
+    renderCockpit({ taskId: 'task-1', api: makeApi(), eventsFetcher: streamOf([page]) })
 
     expect(await screen.findByText('写好了吗？')).toBeInTheDocument()
     expect(await screen.findByText('已经写好了。')).toBeInTheDocument()
+    expect(await screen.findByTestId('thread-status')).toHaveTextContent('执行中 → 已完成')
   })
 
-  it('点击重试调用接口并刷新状态', async () => {
-    const api = makeApi()
+  it('记录页按 seq 增量合并，重复 eventId 不重复渲染', async () => {
+    const page1: EventPage = {
+      events: [
+        { seq: 1, eventId: 'e1', kind: 'task.created', payload: { mode: 'ordinary' }, createdAt: '' },
+        { seq: 2, eventId: 'e2', kind: 'turn.started', payload: {}, createdAt: '' },
+      ],
+      nextSeq: 2,
+    }
+    // 重连后服务端重复返回 e2，并携带新的 e4（seq 允许有洞）
+    const page2: EventPage = {
+      events: [
+        { seq: 2, eventId: 'e2', kind: 'turn.started', payload: {}, createdAt: '' },
+        { seq: 4, eventId: 'e4', kind: 'turn.done', payload: { duration_ms: 1200 }, createdAt: '' },
+      ],
+      nextSeq: 4,
+    }
+
     const user = userEvent.setup()
-    renderCockpit({ taskId: 'task-1', api })
-
-    const button = await screen.findByRole('button', { name: '重试' })
-    await user.click(button)
-
-    await waitFor(() => {
-      expect(api.retryStep).toHaveBeenCalledWith('step-2', '', 4)
+    renderCockpit({
+      taskId: 'task-1',
+      api: makeApi(),
+      eventsFetcher: streamOf([page1, page2]),
     })
-    expect(api.fetchIssue).toHaveBeenCalledTimes(2)
+
+    await user.click(await screen.findByRole('tab', { name: '记录' }))
+
+    await screen.findByTestId('event-1')
+    await screen.findByTestId('event-4')
+    expect(screen.getByTestId('event-2')).toBeInTheDocument()
+    expect(screen.queryAllByText('开始一轮执行')).toHaveLength(1)
+  })
+
+  it('展示产物并提供下载', async () => {
+    const download = vi.fn().mockResolvedValue(undefined)
+    const api = makeApi({
+      fetchArtifacts: vi.fn().mockResolvedValue([
+        { id: 'art-1', taskId: 'task-1', path: 'dist/index.html', sha256: 'h', sizeBytes: 2048, contentType: 'text/html' },
+      ]),
+      downloadArtifact: download as unknown as CockpitApi['downloadArtifact'],
+    })
+    const user = userEvent.setup()
+    renderCockpit({ taskId: 'task-1', api, eventsFetcher: streamOf([{ events: [], nextSeq: 0 }]) })
+
+    expect(await screen.findByText('index.html')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '下载' }))
+    await waitFor(() => expect(download).toHaveBeenCalledWith('task-1', expect.objectContaining({ id: 'art-1' })))
   })
 })

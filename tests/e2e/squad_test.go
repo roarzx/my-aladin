@@ -12,7 +12,7 @@ import (
 	"github.com/roarzx/my-aladin/internal/agent"
 	"github.com/roarzx/my-aladin/internal/domain"
 	"github.com/roarzx/my-aladin/internal/idgen"
-	"github.com/roarzx/my-aladin/internal/orchestration"
+	"github.com/roarzx/my-aladin/internal/squadrunner"
 	"github.com/roarzx/my-aladin/internal/session"
 	"github.com/roarzx/my-aladin/internal/squad"
 	mysqlstore "github.com/roarzx/my-aladin/internal/store/mysql"
@@ -37,7 +37,7 @@ type squadScenario struct {
 
 type scenarioDispatcher struct{ calls int }
 
-func (d *scenarioDispatcher) DispatchSquad(context.Context, orchestration.SquadDispatch) error {
+func (d *scenarioDispatcher) DispatchSquad(context.Context, squadrunner.SquadDispatch) error {
 	d.calls++
 	return nil
 }
@@ -157,7 +157,7 @@ func TestSquad(t *testing.T) {
 
 	// SquadRunner 启动第一个工作项
 	dispatcher := &scenarioDispatcher{}
-	runner := &orchestration.SquadRunner{
+	runner := &squadrunner.SquadRunner{
 		DB: db, Dispatcher: dispatcher, Sessions: &session.Service{DB: db}, Owner: "e2e-squad",
 	}
 	if err := runner.RunOnce(ctx, created.ID); err != nil {

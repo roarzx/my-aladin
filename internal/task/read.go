@@ -35,12 +35,14 @@ type taskView struct {
 	CancelAt    *time.Time `json:"cancelRequestedAt,omitempty"`
 }
 
-type planSummary struct {
-	ID          string `json:"id"`
-	Revision    int    `json:"revision"`
-	Status      string `json:"status"`
-	ContentHash string `json:"contentHash"`
-	StepCount   int    `json:"stepCount"`
+// runSummary 是最近一轮执行的摘要，供驾驶舱显示「上轮何时结束」。
+type runSummary struct {
+	ID        string     `json:"id"`
+	Status    string     `json:"status"`
+	AgentID   string     `json:"agentId"`
+	Reply     string     `json:"reply,omitempty"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
 }
 
 type agentSummary struct {
@@ -93,21 +95,11 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var plan *planSummary
-	revision, err := mysqlstore.LatestPlanRevision(ctx, h.DB, taskID)
-	if err != nil {
-		httpapi.Fail(w, errcode.New(errcode.UpstreamUnavailable, "读取计划失败"))
-		return
-	}
-	if revision > 0 {
-		p, steps, err := mysqlstore.GetPlanByRevision(ctx, h.DB, taskID, revision)
-		if err != nil {
-			httpapi.Fail(w, errcode.New(errcode.UpstreamUnavailable, "读取计划失败"))
-			return
-		}
-		plan = &planSummary{
-			ID: p.ID, Revision: p.Revision, Status: string(p.Status),
-			ContentHash: p.ContentHash, StepCount: len(steps),
+	var latestRun *runSummary
+	if run, ok, err := mysqlstore.LatestIssueRun(ctx, h.DB, taskID); err == nil && ok {
+		latestRun = &runSummary{
+			ID: run.ID, Status: string(run.Status), AgentID: run.AgentID,
+			Reply: run.Reply, CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt,
 		}
 	}
 
@@ -142,7 +134,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 			PlanBranch: task.PlanBranch, CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
 			CancelAt: task.CancelRequestedAt,
 		},
-		"plan":         plan,
+		"latestRun":    latestRun,
 		"acceptance":   nil,
 		"agents":       agentViews,
 		"repositories": repoViews,

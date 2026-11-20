@@ -1247,3 +1247,63 @@
   font-size: 13px;
   font-weight: 500;
 }
+
+/* 会话时间线里的系统行（状态上报、失败、Agent 提问）。 */
+.thread-system {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.thread-system.failed {
+  border-color: color-mix(in srgb, var(--red) 35%, var(--line));
+  color: var(--text);
+}
+
+.thread-system .msg-time {
+  margin-left: auto;
+}
+
+/* 产物面板 */
+.artifact-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+}
+
+.artifact-panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.artifact-panel-head .muted {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.artifact-name {
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-sub {
+  color: var(--faint);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

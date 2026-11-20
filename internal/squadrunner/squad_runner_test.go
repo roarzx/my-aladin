@@ -1,6 +1,6 @@
 //go:build integration
 
-package orchestration_test
+package squadrunner_test
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"github.com/roarzx/my-aladin/internal/agent"
 	"github.com/roarzx/my-aladin/internal/domain"
 	"github.com/roarzx/my-aladin/internal/idgen"
-	"github.com/roarzx/my-aladin/internal/orchestration"
+	"github.com/roarzx/my-aladin/internal/squadrunner"
 	"github.com/roarzx/my-aladin/internal/session"
 	"github.com/roarzx/my-aladin/internal/squad"
 	mysqlstore "github.com/roarzx/my-aladin/internal/store/mysql"
@@ -23,11 +23,11 @@ import (
 
 type squadFakeDispatcher struct {
 	mu    sync.Mutex
-	calls []orchestration.SquadDispatch
+	calls []squadrunner.SquadDispatch
 	fail  bool
 }
 
-func (d *squadFakeDispatcher) DispatchSquad(_ context.Context, req orchestration.SquadDispatch) error {
+func (d *squadFakeDispatcher) DispatchSquad(_ context.Context, req squadrunner.SquadDispatch) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.calls = append(d.calls, req)
@@ -115,7 +115,7 @@ func TestSquadRunner(t *testing.T) {
 	f := setupSquad(t)
 	ctx := context.Background()
 	dispatcher := &squadFakeDispatcher{fail: true}
-	runner := &orchestration.SquadRunner{
+	runner := &squadrunner.SquadRunner{
 		DB: f.db, Dispatcher: dispatcher, Sessions: &session.Service{DB: f.db},
 		Owner: "squad-runner",
 	}
@@ -161,13 +161,13 @@ func TestRunnerMutualExclusion(t *testing.T) {
 	ctx := context.Background()
 	client := testkit.NewRedis(t)
 	dispatcher := &squadFakeDispatcher{}
-	runner := &orchestration.SquadRunner{
+	runner := &squadrunner.SquadRunner{
 		DB: f.db, Dispatcher: dispatcher,
-		Lock: orchestration.NewTaskLock(client, time.Second, -1), Owner: "squad",
+		Lock: squadrunner.NewTaskLock(client, time.Second, -1), Owner: "squad",
 	}
 
 	// 另一个 Runner（PlanRunner 同等）持有同一任务锁 → 本 Runner 必须跳过
-	lock := orchestration.NewTaskLock(client, time.Second, -1)
+	lock := squadrunner.NewTaskLock(client, time.Second, -1)
 	release, err := lock.Acquire(ctx, f.taskID, "plan")
 	if err != nil {
 		t.Fatal(err)

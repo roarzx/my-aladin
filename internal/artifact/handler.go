@@ -60,7 +60,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	attempt, err := mysqlstore.GetAttemptByExecution(r.Context(), h.DB, body.ExecutionID)
+	run, err := mysqlstore.GetIssueRunByExecution(r.Context(), h.DB, body.ExecutionID)
 	if errors.Is(err, sql.ErrNoRows) {
 		httpapi.Fail(w, errcode.New(errcode.NotFound, "执行不存在"))
 		return
@@ -69,18 +69,8 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		httpapi.Fail(w, errcode.New(errcode.UpstreamUnavailable, "读取执行失败"))
 		return
 	}
-	step, err := mysqlstore.GetStepByID(r.Context(), h.DB, attempt.StepID)
-	if err != nil {
-		httpapi.Fail(w, errcode.New(errcode.NotFound, "步骤不存在"))
-		return
-	}
-	plan, _, err := mysqlstore.GetPlanByID(r.Context(), h.DB, step.PlanID)
-	if err != nil {
-		httpapi.Fail(w, errcode.New(errcode.NotFound, "计划不存在"))
-		return
-	}
 
-	item, err := h.Service.Save(r.Context(), plan.TaskID, step.ID, attempt.ID,
+	item, err := h.Service.Save(r.Context(), run.TaskID, run.ID,
 		safeDisplayPath(body.Path), body.ContentType, data)
 	if err != nil {
 		httpapi.Fail(w, err)

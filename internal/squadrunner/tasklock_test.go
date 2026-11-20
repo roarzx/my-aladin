@@ -1,6 +1,6 @@
 //go:build integration
 
-package orchestration_test
+package squadrunner_test
 
 import (
 	"context"
@@ -9,21 +9,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/roarzx/my-aladin/internal/orchestration"
+	"github.com/roarzx/my-aladin/internal/squadrunner"
 	"github.com/roarzx/my-aladin/internal/testkit"
 )
 
 func TestTaskLockMutualExclusion(t *testing.T) {
 	ctx := context.Background()
 	client := testkit.NewRedis(t)
-	lock := orchestration.NewTaskLock(client, 300*time.Millisecond, -1)
+	lock := squadrunner.NewTaskLock(client, 300*time.Millisecond, -1)
 	taskID := fmt.Sprintf("lock-%d", time.Now().UnixNano())
 
 	releaseA, err := lock.Acquire(ctx, taskID, "owner-a")
 	if err != nil {
 		t.Fatalf("获取锁: %v", err)
 	}
-	if _, err := lock.Acquire(ctx, taskID, "owner-b"); !errors.Is(err, orchestration.ErrTaskLocked) {
+	if _, err := lock.Acquire(ctx, taskID, "owner-b"); !errors.Is(err, squadrunner.ErrTaskLocked) {
 		t.Fatalf("第二个持有者应失败，实际: %v", err)
 	}
 
@@ -38,7 +38,7 @@ func TestTaskLockMutualExclusion(t *testing.T) {
 func TestTaskLockExpires(t *testing.T) {
 	ctx := context.Background()
 	client := testkit.NewRedis(t)
-	lock := orchestration.NewTaskLock(client, 100*time.Millisecond, -1)
+	lock := squadrunner.NewTaskLock(client, 100*time.Millisecond, -1)
 	taskID := fmt.Sprintf("lock-ttl-%d", time.Now().UnixNano())
 
 	if _, err := lock.Acquire(ctx, taskID, "owner-a"); err != nil {
