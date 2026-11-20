@@ -12,10 +12,13 @@ import {
   IconLayers,
   IconLogout,
   IconMenu,
+  IconMoon,
   IconSend,
+  IconSun,
   IconSettings,
   IconUser,
 } from './icons'
+import { storedTheme, toggleTheme, type Theme } from '../theme'
 import { ToastHost, toast } from './ui'
 
 const COLLAPSE_KEY = 'hercules_sidebar_collapsed'
@@ -186,6 +189,22 @@ function Navigation({
   )
 }
 
+/** 主题切换：暗色为默认，点击切回浅色。 */
+function ThemeToggle() {
+  const [theme, setTheme] = useState<Theme>(() => storedTheme())
+  return (
+    <button
+      type="button"
+      className="button ghost icon-only"
+      aria-label={theme === 'dark' ? '切换到浅色主题' : '切换到暗色主题'}
+      title={theme === 'dark' ? '切换到浅色主题' : '切换到暗色主题'}
+      onClick={() => setTheme((current) => toggleTheme(current))}
+    >
+      {theme === 'dark' ? <IconSun width={16} height={16} /> : <IconMoon width={16} height={16} />}
+    </button>
+  )
+}
+
 function UserMenu() {
   const [open, setOpen] = useState(false)
 
@@ -339,6 +358,7 @@ export default function AppShell({ title, breadcrumb, actions, children, classNa
           </div>
           <div className="topbar-actions">
             {actions}
+            <ThemeToggle />
             <UserMenu />
           </div>
         </header>

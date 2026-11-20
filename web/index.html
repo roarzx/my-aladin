@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>阿拉丁 · Issue 驾驶舱</title>
+    <script>
+      // 首屏前决定主题，避免暗色用户看到白底闪烁。
+      try {
+        document.documentElement.dataset.theme =
+          localStorage.getItem('aladdin_theme') === 'light' ? 'light' : 'dark'
+      } catch (e) {
+        document.documentElement.dataset.theme = 'dark'
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

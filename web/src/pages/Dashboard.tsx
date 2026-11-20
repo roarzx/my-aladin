@@ -15,7 +15,7 @@ const STATUS_META: Record<TaskStatus, { label: string; tone: TagTone }> = {
   failed: { label: '已失败', tone: 'failed' },
 }
 
-/** 参考站按状态近似识别「待我处理」：计划确认、失败重试、输入请求。 */
+/** 「待我处理」：需要人介入的状态（失败重试、Agent 阻塞）。 */
 const ATTENTION_STATUSES: TaskStatus[] = ['failed', 'paused']
 
 function shortId(id: string): string {
@@ -121,7 +121,7 @@ export default function Dashboard() {
             <MetricCard
               label="已完成"
               value={completedCount}
-              foot="计划全部完成，可查看产物或继续对话"
+              foot="Agent 已上报完成，可查看产物或继续对话"
               to="/task/list"
             />
           </div>

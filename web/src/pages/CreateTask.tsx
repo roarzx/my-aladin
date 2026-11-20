@@ -10,7 +10,7 @@ import {
   type Repository,
 } from '../api/controlplane'
 import { ApiError } from '../api/issues'
-import { saveTaskDraft } from '../api/taskDraft'
+import { clearTaskDraft } from '../api/taskDraft'
 import AppShell from '../components/AppShell'
 import { IconArrowLeft, IconPlus, IconRefresh } from '../components/icons'
 import { EmptyState, Panel, StateTag, toast } from '../components/ui'
@@ -148,9 +148,10 @@ export default function CreateTask() {
         agentIds: [agentId],
         plannerAgentId: agentId,
         repositories: repositoryId ? [repositoryId] : [],
+        requirementContent: description.trim() || undefined,
       })
-      saveTaskDraft(created.id, description)
-      toast('任务已创建，正在进入驾驶舱…')
+      clearTaskDraft(created.id)
+      toast('任务已创建，Agent 开始执行…')
       navigate(`/task/detail?id=${encodeURIComponent(created.id)}`)
     } catch (err) {
       setNotice(err instanceof ApiError ? err.message : String(err))
@@ -198,7 +199,7 @@ export default function CreateTask() {
           <div className="empty-inline">加载中…</div>
         </Panel>
       ) : step === 1 ? (
-        <Panel title="任务信息" subtitle="填写任务名称与需求描述，创建后进入驾驶舱提交计划。">
+        <Panel title="任务信息" subtitle="填写任务名称与需求描述，创建后立即交给 Agent 执行。">
           <div className="form-grid">
             <label className="field wide">
               <span>任务名称</span>
@@ -222,9 +223,9 @@ export default function CreateTask() {
                 className="system-prompt-input"
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
-                placeholder="补充背景、验收标准与相关链接。该内容会作为驾驶舱提交计划时的默认正文。"
+                placeholder="补充背景、验收标准与相关链接。该内容会作为第一轮执行的提示词。"
               />
-              <small>仅保存在当前浏览器，用于预填计划正文，不作为任务字段提交。</small>
+              <small>随任务一起提交，作为 Agent 第一轮的提示词。</small>
             </label>
           </div>
 
@@ -273,7 +274,7 @@ export default function CreateTask() {
                   <small>
                     {selectedAgent
                       ? `规划与执行均由该 Agent 承担（plannerAgentId 同为 ${selectedAgent.name}）。`
-                      : '创建任务后可在驾驶舱提交计划并启动执行。'}
+                      : '创建后会自动开始执行，机器离线时可稍后手动开始。'}
                   </small>
                 </label>
               </div>

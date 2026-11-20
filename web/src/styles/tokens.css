@@ -1,29 +1,105 @@
-/* 设计规范：取自 hercules-frontend 线上样式表的 :root 变量 */
+/* 设计规范：暗色为默认主题，浅色可切回（html[data-theme='light']）。 */
 :root {
+  /* 页面与面板 */
+  --bg: #0b0c0f;
+  --bg-soft: #101218;
+  --surface: #161920;
+  --surface-soft: #12141a;
+  --surface-blue: #161e2b;
+  --sidebar-bg: rgba(13, 15, 19, 0.92);
+  --topbar-bg: rgba(11, 12, 15, 0.86);
+  --overlay: rgba(0, 0, 0, 0.6);
+  --surface-hover: #1b1f27;
+  --line: #242833;
+  --line-strong: #343945;
+  --code-bg: #0b0e14;
+  --code-text: #dbe4f0;
+
+  /* 文字 */
+  --text: #e7e9ee;
+  --muted: #9aa1ad;
+  --faint: #6b7280;
+
+  /* 强调色（偏冷） */
+  --brand: #3b82f6;
+  --blue: #60a5fa;
+  --blue-2: #3b82f6;
+  --blue-soft: #132033;
+  --blue-line: #1e3a5f;
+  --blue-ink: #93c5fd;
+
+  --green: #34d399;
+  --green-soft: #10231a;
+  --green-line: #1b3a2a;
+  --green-ink: #6ee7b7;
+
+  --yellow: #fbbf24;
+  --yellow-soft: #2a2110;
+  --yellow-line: #4a3a12;
+  --yellow-ink: #fcd34d;
+
+  --red: #f87171;
+  --red-soft: #2a1618;
+  --red-line: #4a2020;
+  --red-ink: #fca5a5;
+
+  --cyan: #22d3ee;
+  --cyan-soft: #102429;
+  --cyan-line: #17414a;
+
+  --radius: 10px;
+  --radius-sm: 8px;
+  --shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+  --shadow-soft: 0 3px 10px rgba(0, 0, 0, 0.3);
+  color-scheme: dark;
+}
+
+/* 浅色：原 hercules-frontend 主题，用于切回。 */
+:root[data-theme='light'] {
   --bg: #f6f8fc;
   --bg-soft: #f9fbff;
   --surface: #fff;
+  --surface-soft: hsla(0, 0%, 100%, 0.72);
   --surface-blue: #f2f7ff;
+  --sidebar-bg: hsla(0, 0%, 100%, 0.92);
+  --topbar-bg: hsla(0, 0%, 100%, 0.86);
+  --overlay: rgba(15, 23, 42, 0.38);
   --surface-hover: #f8fbff;
   --line: #e3eaf5;
   --line-strong: #cfd9ea;
+  --code-bg: #0f172a;
+  --code-text: #e2e8f0;
+
   --text: #172033;
   --muted: #667085;
   --faint: #98a2b3;
+
   --brand: #2563eb;
   --blue: #2563eb;
   --blue-2: #3b82f6;
   --blue-soft: #eff6ff;
+  --blue-line: #bfdbfe;
+  --blue-ink: #1d4ed8;
+
   --green: #16a34a;
   --green-soft: #ecfdf3;
+  --green-line: #bbf7d0;
+  --green-ink: #166534;
+
   --yellow: #d97706;
   --yellow-soft: #fff7ed;
+  --yellow-line: #fed7aa;
+  --yellow-ink: #a95500;
+
   --red: #dc2626;
   --red-soft: #fef2f2;
+  --red-line: #fecaca;
+  --red-ink: #991b1b;
+
   --cyan: #0284c7;
   --cyan-soft: #ecfeff;
-  --radius: 10px;
-  --radius-sm: 8px;
+  --cyan-line: #bae6fd;
+
   --shadow: 0 8px 22px rgba(27, 45, 78, 0.055);
   --shadow-soft: 0 3px 10px rgba(27, 45, 78, 0.035);
   color-scheme: light;

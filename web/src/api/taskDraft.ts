@@ -1,6 +1,6 @@
 /**
- * 创建任务时填写的需求描述只保存在浏览器侧，用于驾驶舱「提交计划」的默认正文。
- * 后端 Task 没有对应字段（见 docs/main-path-plan.md 六、创建任务）。
+ * 任务草稿：需求正文现在随创建请求一起提交（tasks.requirement），
+ * 这里只保留表单的本地暂存能力，供尚未提交的编辑内容恢复。
  */
 const PREFIX = 'aladdin:task-draft:'
 

@@ -120,6 +120,8 @@ export function createIssue(
     agentIds: string[]
     plannerAgentId: string
     repositories: string[]
+    /** 需求正文：创建后立即作为第一轮提示词交给 Agent。 */
+    requirementContent?: string
   },
 ): Promise<{ id: string; status: string }> {
   return request<{ id: string; status: string }>(

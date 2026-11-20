@@ -23,8 +23,8 @@
 }
 
 .conversation-page-sidebar {
-  border-right: 1px solid var(--line);
-  background: var(--bg-soft);
+  border-right:1px solid var(--line);
+  background:var(--bg-soft);
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -36,13 +36,13 @@
   justify-content: space-between;
   gap: 8px;
   padding: 12px 14px 10px;
-  border-bottom: 1px solid var(--line);
+  border-bottom:1px solid var(--line);
 }
 
 .section-label {
   font-size: 12px;
   font-weight: 600;
-  color: var(--faint);
+  color:var(--faint);
   letter-spacing: 0.04em;
 }
 
@@ -63,7 +63,7 @@
 
 .conversation-history-group-label {
   font-size: 11px;
-  color: var(--faint);
+  color:var(--faint);
   padding: 2px 6px;
 }
 
@@ -75,24 +75,24 @@
 .conversation-history-main {
   width: 100%;
   text-align: left;
-  background: transparent;
-  border: 0;
+  background:transparent;
+  border:0;
   border-radius: var(--radius-sm);
   padding: 8px 10px;
   cursor: pointer;
   font: inherit;
-  color: var(--text);
+  color:var(--text);
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
 .conversation-history-item:hover .conversation-history-main {
-  background: var(--surface-hover);
+  background:var(--surface-hover);
 }
 
 .conversation-history-item.active .conversation-history-main {
-  background: var(--blue-soft);
+  background:var(--blue-soft);
   box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 
@@ -123,20 +123,20 @@
   line-height: 1;
   padding: 3px 6px;
   border-radius: 999px;
-  border: 1px solid var(--line-strong);
-  color: var(--muted);
-  background: var(--surface);
+  border:1px solid var(--line-strong);
+  color:var(--muted);
+  background:var(--surface);
 }
 
 .conversation-history-badge.draft {
-  color: var(--yellow);
-  border-color: var(--yellow);
-  background: var(--yellow-soft);
+  color:var(--yellow);
+  border-color:var(--yellow);
+  background:var(--yellow-soft);
 }
 
 .conversation-history-preview {
   font-size: 12px;
-  color: var(--faint);
+  color:var(--faint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -148,7 +148,7 @@
   justify-content: space-between;
   gap: 8px;
   font-size: 11px;
-  color: var(--faint);
+  color:var(--faint);
 }
 
 .conversation-history-avatars {
@@ -158,7 +158,7 @@
 .conversation-history-avatars .collab-avatar {
   width: 20px;
   height: 20px;
-  border: 2px solid var(--surface);
+  border:2px solid var(--surface);
   margin-left: -6px;
 }
 
@@ -171,9 +171,9 @@
   top: 8px;
   right: 8px;
   display: none;
-  border: 0;
-  background: transparent;
-  color: var(--faint);
+  border:0;
+  background:transparent;
+  color:var(--faint);
   cursor: pointer;
   padding: 2px;
 }
@@ -183,7 +183,7 @@
 }
 
 .conversation-history-edit:hover {
-  color: var(--text);
+  color:var(--text);
 }
 
 .conversation-history-editor {
@@ -201,8 +201,8 @@
   position: fixed;
   z-index: 95;
   min-width: 120px;
-  background: var(--surface);
-  border: 1px solid var(--line);
+  background:var(--surface);
+  border:1px solid var(--line);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
   padding: 4px;
@@ -211,23 +211,23 @@
 }
 
 .conversation-history-context-menu button {
-  border: 0;
-  background: transparent;
+  border:0;
+  background:transparent;
   text-align: left;
   padding: 8px 10px;
   border-radius: 6px;
   font: inherit;
   font-size: 13px;
   cursor: pointer;
-  color: var(--text);
+  color:var(--text);
 }
 
 .conversation-history-context-menu button:hover {
-  background: var(--surface-hover);
+  background:var(--surface-hover);
 }
 
 .conversation-history-context-menu button.danger {
-  color: var(--red);
+  color:var(--red);
 }
 
 .conversation-page-main {
@@ -243,7 +243,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 14px 16px;
-  border-bottom: 1px solid var(--line);
+  border-bottom:1px solid var(--line);
   flex-wrap: wrap;
 }
 
@@ -271,7 +271,7 @@
 
 .conversation-page-summary {
   font-size: 12px;
-  color: var(--muted);
+  color:var(--muted);
 }
 
 .conversation-page-actions {
@@ -290,7 +290,7 @@
 
 .chat-panel-head {
   padding: 12px 16px;
-  border-bottom: 1px solid var(--line);
+  border-bottom:1px solid var(--line);
 }
 
 .chat-panel-head h3 {
@@ -315,12 +315,12 @@
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  color: var(--muted);
+  color:var(--muted);
 }
 
 .conversation-empty-state strong {
   font-size: 16px;
-  color: var(--text);
+  color:var(--text);
 }
 
 .conversation-empty-state p {
@@ -350,22 +350,22 @@
   align-items: baseline;
   gap: 8px;
   font-size: 12px;
-  color: var(--faint);
+  color:var(--faint);
 }
 
 .message-row-meta .name {
   font-weight: 600;
-  color: var(--text);
+  color:var(--text);
 }
 
 .message-row-content {
   font-size: 13px;
   line-height: 1.6;
-  color: var(--text);
+  color:var(--text);
 }
 
 .composer {
-  border-top: 1px solid var(--line);
+  border-top:1px solid var(--line);
   padding: 10px 16px 14px;
   display: flex;
   flex-direction: column;
@@ -392,22 +392,22 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--line);
+  border:1px solid var(--line);
   border-radius: 6px;
-  background: var(--surface);
-  color: var(--muted);
+  background:var(--surface);
+  color:var(--muted);
   cursor: pointer;
 }
 
 .composer-attachment-button:hover,
 .composer-tool-button:hover {
-  color: var(--text);
-  border-color: var(--line-strong);
+  color:var(--text);
+  border-color:var(--line-strong);
 }
 
 .composer-hint {
   font-size: 12px;
-  color: var(--faint);
+  color:var(--faint);
 }
 
 .composer textarea {
@@ -426,15 +426,15 @@
 
 .composer-count {
   font-size: 12px;
-  color: var(--faint);
+  color:var(--faint);
 }
 
 .collab-avatar {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: var(--blue-soft);
-  color: var(--brand);
+  background:var(--blue-soft);
+  color:var(--brand);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -449,14 +449,14 @@
   position: fixed;
   inset: 0;
   z-index: 90;
-  background: rgba(15, 23, 42, 0.32);
+  background:rgba(15, 23, 42, 0.32);
   display: flex;
   justify-content: flex-end;
 }
 
 .conversation-inspector-panel {
   width: min(420px, 100%);
-  background: var(--surface);
+  background:var(--surface);
   height: 100%;
   overflow-y: auto;
   display: flex;
@@ -469,7 +469,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  border-bottom: 1px solid var(--line);
+  border-bottom:1px solid var(--line);
 }
 
 .conversation-inspector-head strong {
@@ -492,7 +492,7 @@
 .conversation-inspector-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text);
+  color:var(--text);
 }
 
 .conversation-inspector-meta {
@@ -503,7 +503,7 @@
 }
 
 .conversation-inspector-meta .label {
-  color: var(--faint);
+  color:var(--faint);
 }
 
 .conversation-title-display {
@@ -520,15 +520,15 @@
 }
 
 .conversation-title-edit {
-  border: 0;
-  background: transparent;
-  color: var(--faint);
+  border:0;
+  background:transparent;
+  color:var(--faint);
   cursor: pointer;
   padding: 2px;
 }
 
 .conversation-title-edit:hover {
-  color: var(--text);
+  color:var(--text);
 }
 
 .conversation-title-editor {
@@ -557,7 +557,7 @@
 
 .conversation-inspector-empty {
   font-size: 12px;
-  color: var(--faint);
+  color:var(--faint);
   line-height: 1.6;
 }
 
@@ -615,22 +615,22 @@
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 12px;
-  border: 1px solid var(--line-strong);
-  color: var(--muted);
+  border:1px solid var(--line-strong);
+  color:var(--muted);
 }
 
 .channel-feedback-type.like,
 .channel-feedback-type.accurate {
-  color: var(--green);
-  border-color: var(--green);
-  background: var(--green-soft);
+  color:var(--green);
+  border-color:var(--green);
+  background:var(--green-soft);
 }
 
 .channel-feedback-type.dislike,
 .channel-feedback-type.inaccurate {
-  color: var(--red);
-  border-color: var(--red);
-  background: var(--red-soft);
+  color:var(--red);
+  border-color:var(--red);
+  background:var(--red-soft);
 }
 
 /* ---------- 反馈详情 ---------- */
@@ -651,7 +651,7 @@
 
 .channel-feedback-detail-head .feedback-id {
   font-size: 12px;
-  color: var(--faint);
+  color:var(--faint);
 }
 
 .channel-feedback-detail-grid {
@@ -662,13 +662,13 @@
 }
 
 .channel-feedback-section {
-  border: 1px solid var(--line);
+  border:1px solid var(--line);
   border-radius: var(--radius);
   padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: var(--surface);
+  background:var(--surface);
 }
 
 .channel-feedback-section-title {
@@ -681,27 +681,27 @@
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  border: 0;
-  background: transparent;
+  border:0;
+  background:transparent;
   padding: 0;
   font: inherit;
   font-weight: 600;
   font-size: 13px;
   cursor: pointer;
-  color: var(--text);
+  color:var(--text);
 }
 
 .channel-feedback-target-collapse .hint {
   font-weight: 400;
   font-size: 12px;
-  color: var(--faint);
+  color:var(--faint);
 }
 
 .channel-feedback-side-card {
-  border: 1px solid var(--line);
+  border:1px solid var(--line);
   border-radius: var(--radius);
   padding: 14px;
-  background: var(--surface);
+  background:var(--surface);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -717,14 +717,14 @@
   display: flex;
   gap: 10px;
   font-size: 12px;
-  color: var(--muted);
+  color:var(--muted);
 }
 
 .channel-feedback-timeline-item .dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--line-strong);
+  background:var(--line-strong);
   margin-top: 4px;
   flex-shrink: 0;
 }
@@ -738,8 +738,8 @@
   }
 
   .conversation-page-sidebar {
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
+    border-right:0;
+    border-bottom:1px solid var(--line);
     max-height: 260px;
     overflow-y: auto;
   }
