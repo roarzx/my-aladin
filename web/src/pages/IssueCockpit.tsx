@@ -128,6 +128,12 @@ function formatTime(value: string): string {
   return date.toLocaleString('zh-CN', { hour12: false })
 }
 
+/** 截断长文本，完整内容留给 title。 */
+function clip(text: string, limit: number): string {
+  const runes = Array.from(text)
+  return runes.length <= limit ? text : `${runes.slice(0, limit).join('')}…`
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -185,31 +191,31 @@ function buildThread(events: { seq: number; eventId: string; kind: string; paylo
 
 function ThreadBubble({
   item,
+  agentName,
   actions,
 }: {
   item: ThreadItem
+  agentName: string
   actions?: ReactNode
 }): ReactNode {
-  if (item.kind === 'user') {
+  if (item.kind === 'user' || item.kind === 'assistant') {
+    const isUser = item.kind === 'user'
     return (
-      <article className="msg" data-testid="thread-user">
-        <div className="msg-head">
-          <span className="role-badge">你</span>
-          <span className="msg-time">{formatTime(item.at)}</span>
-        </div>
-        <div className="msg-body">{item.text}</div>
-      </article>
-    )
-  }
-  if (item.kind === 'assistant') {
-    return (
-      <article className="msg" data-testid="thread-assistant">
-        <div className="msg-head">
-          <span className="role-badge">Agent</span>
-          <span className="msg-time">{formatTime(item.at)}</span>
-        </div>
-        <div className="msg-body">
-          <MarkdownView text={item.text} />
+      <article
+        className={`chat-msg ${isUser ? 'user' : 'agent'}`}
+        data-testid={isUser ? 'thread-user' : 'thread-assistant'}
+      >
+        <span className={`chat-avatar ${isUser ? 'user' : 'agent'}`} aria-hidden>
+          {isUser ? '你' : (agentName || 'AI').slice(0, 1).toUpperCase()}
+        </span>
+        <div className="chat-bubble">
+          <div className="chat-meta">
+            <span className="chat-role">{isUser ? '你' : agentName || 'Agent'}</span>
+            <span className="msg-time">{formatTime(item.at)}</span>
+          </div>
+          <div className="chat-body">
+            {isUser ? item.text : <MarkdownView text={item.text} />}
+          </div>
         </div>
       </article>
     )
@@ -227,9 +233,9 @@ function ThreadBubble({
     return (
       <div className="thread-system" data-testid="thread-status">
         <StateDot tone="review" />
-        <span>
+        <span className="thread-system-text" title={item.reason || undefined}>
           状态：{statusName(item.from)} → {statusName(item.to)}
-          {item.reason ? `（${item.reason}）` : ''}
+          {item.reason ? `（${clip(item.reason, 60)}）` : ''}
         </span>
         <span className="msg-time">{formatTime(item.at)}</span>
       </div>
@@ -452,6 +458,7 @@ export default function IssueCockpit({ taskId, api, eventsFetcher }: IssueCockpi
                   <ThreadBubble
                     key={item.key}
                     item={item}
+                    agentName={detail.agents?.[0]?.name ?? ''}
                     actions={
                       item.kind === 'failed' && canStart ? (
                         <>
