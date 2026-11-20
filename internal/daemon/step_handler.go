@@ -193,6 +193,8 @@ func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender)
 		})
 	}
 
+	// 汇总本轮助手输出，随 step_done 回传，用于会话页展示「回复」。
+	var reply strings.Builder
 	result, err := session.Prompt(ctx, promptWithSystem(params), func(event agentevent.Event) {
 		switch event.Kind {
 		case agentevent.KindToolCall, agentevent.KindToolUpdate:
@@ -208,6 +210,9 @@ func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender)
 		}
 		if event.Kind == agentevent.KindStreamDelta {
 			_, _ = digest.Write([]byte(event.Text))
+			if reply.Len() < maxReplyBytes {
+				reply.WriteString(event.Text)
+			}
 		}
 		if err := sender.SendStream(params.ExecutionID, params.AttemptNo, params.StepID,
 			seq.Add(1), event.Text, false); err != nil {
@@ -247,6 +252,7 @@ func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender)
 			"input_tokens":   result.Usage.InputTokens,
 			"output_tokens":  result.Usage.OutputTokens,
 			"duration_ms":    time.Since(runStarted).Milliseconds(),
+			"reply":          reply.String(),
 		}); err != nil {
 			h.log().Warn("发送 step_done 失败", "err", err)
 		}
@@ -255,6 +261,9 @@ func (h *StepHandler) run(ctx context.Context, params stepParams, sender Sender)
 			fmt.Errorf("prompt 以 %q 结束", result.StopReason))
 	}
 }
+
+// maxReplyBytes 限制随 step_done 回传的助手文本长度（会话展示用）。
+const maxReplyBytes = 8000
 
 // uploadArtifacts 把本次执行期间新增/修改的文件上报给控制面。
 func (h *StepHandler) uploadArtifacts(ctx context.Context, params stepParams, workDir string, since time.Time) {

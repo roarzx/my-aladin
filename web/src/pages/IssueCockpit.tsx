@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 
 import {
   cancelIssue,
@@ -11,6 +11,7 @@ import {
   reconcileStep,
   retryStep,
   startTask,
+  sendMessage,
   submitPlan,
   type Artifact,
   type EventPage,
@@ -46,6 +47,8 @@ export interface CockpitApi {
   fetchArtifacts?: typeof fetchArtifacts
   /** 产物下载。 */
   downloadArtifact?: typeof downloadArtifact
+  /** 会话追问（POST /issues/{id}/messages）。 */
+  sendMessage?: typeof sendMessage
 }
 
 const defaultApi: CockpitApi = {
@@ -59,6 +62,7 @@ const defaultApi: CockpitApi = {
   cancelIssue,
   fetchArtifacts,
   downloadArtifact,
+  sendMessage,
 }
 
 export interface IssueCockpitProps {
@@ -193,6 +197,7 @@ export default function IssueCockpit({
   const [infoOpen, setInfoOpen] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [draft, setDraft] = useState('')
+  const [sending, setSending] = useState(false)
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
 
   // 提交计划表单：正文默认取自创建任务时暂存在浏览器侧的描述。
@@ -384,8 +389,39 @@ export default function IssueCockpit({
   const activePlan = planDetail?.plan ?? detail.plan
   const planIdle = activePlan?.status === 'idle'
   const planMeta = activePlan ? planStatusMeta(activePlan.status) : null
-  const planSubmittedAt = events.find((event) => event.kind === 'plan.submitted')?.createdAt ?? ''
+  const planSubmittedAt =
+    [...events].reverse().find((event) => event.kind === 'plan.submitted')?.createdAt ?? ''
   const planSubmittedLabel = planSubmittedAt ? formatTime(planSubmittedAt) : formatTime(task.updatedAt)
+
+  // 会话流：任务创建后的人机消息与历次计划版本按 seq 排列。
+  type ThreadItem =
+    | { key: string; kind: 'user' | 'assistant'; text: string; at: string }
+    | { key: string; kind: 'plan'; revision: number; at: string }
+  const threadItems: ThreadItem[] = []
+  for (const event of [...events].sort((left, right) => left.seq - right.seq)) {
+    const payload = (event.payload ?? {}) as Record<string, unknown>
+    if (event.kind === 'message.user' || event.kind === 'message.assistant') {
+      const text = typeof payload.text === 'string' ? payload.text : ''
+      if (text) {
+        threadItems.push({
+          key: event.eventId,
+          kind: event.kind === 'message.user' ? 'user' : 'assistant',
+          text,
+          at: event.createdAt,
+        })
+      }
+    } else if (event.kind === 'plan.submitted') {
+      threadItems.push({
+        key: event.eventId,
+        kind: 'plan',
+        revision: Number(payload.revision ?? 0),
+        at: event.createdAt,
+      })
+    }
+  }
+  const latestPlanInThread = threadItems.some(
+    (item) => item.kind === 'plan' && activePlan !== null && item.revision === activePlan.revision,
+  )
 
   const updateStepDraft = (index: number, patch: Partial<StepDraft>) => {
     setPlanSteps((prev) => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)))
@@ -504,15 +540,37 @@ export default function IssueCockpit({
     }
   }
 
-  const sendMessage = () => {
-    if (!draft.trim()) return
-    toast('本地后端尚未提供会话消息接口，接入后可在此继续对话')
+  const chatReady = task.status === 'completed' || task.status === 'chatting'
+
+  const sendChatMessage = async () => {
+    const content = draft.trim()
+    if (!content || sending) return
+    if (!chatReady) {
+      toast('任务正在执行，请等待本轮完成后再发送')
+      return
+    }
+    const run = api.sendMessage
+    if (!run) {
+      toast('当前环境不支持发送消息')
+      return
+    }
+    setSending(true)
+    setActionError(null)
+    try {
+      await run(taskId, content)
+      setDraft('')
+      await reload()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSending(false)
+    }
   }
 
   const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      sendMessage()
+      void sendChatMessage()
     }
   }
 
@@ -560,6 +618,85 @@ export default function IssueCockpit({
     }
     return null
   }
+
+  // 最新计划卡片：既可能出现在会话流中（plan.submitted 事件），
+  // 也可能因事件未到达而单独兜底渲染。
+  const latestPlanArticle: ReactNode = activePlan ? (
+              <article className="msg">
+                <Avatar kind="planner" label="规" />
+                <div className="msg-main">
+                  <div className="msg-head">
+                    <strong>规划</strong>
+                    <span className="role-badge">执行</span>
+                    <span className="msg-time">{planSubmittedLabel}</span>
+                  </div>
+                  <div className="msg-status">
+                    <StateDot tone={planMeta ? planMeta.tone : 'muted'} />
+                    {planMeta ? planMeta.label : activePlan.status} · 版本 r{activePlan.revision} ·{' '}
+                    {detail.plan?.stepCount ?? steps.length} 步
+                  </div>
+
+                  {planDetail?.plan?.contentMd ? (
+                    <div className="msg-body">
+                      <MarkdownView text={planDetail.plan.contentMd} />
+                    </div>
+                  ) : null}
+
+                  <ol className="step-list chat-steps">
+                    {steps.map((step) => {
+                      const meta = stepStatusMeta(step.status)
+                      return (
+                        <li
+                          key={step.id}
+                          className={stepCardClass(step.status)}
+                          data-testid={`step-${step.ordinal}`}
+                        >
+                          <div className="step-top">
+                            <span className="step-title">
+                              {step.ordinal}. {step.title}
+                            </span>
+                            <span className="step-status" data-testid={`step-status-${step.ordinal}`}>
+                              <StateTag tone={meta.tone}>{meta.label}</StateTag>
+                            </span>
+                          </div>
+                          <div className="step-meta">
+                            <span>@{step.agentRef}</span>
+                            {stepActions(step)}
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ol>
+
+                  {planIdle ? (
+                    <div className="msg-actions">
+                      <button
+                        type="button"
+                        className="button ghost"
+                        disabled={planBusy !== null || !api.confirmPlan}
+                        onClick={() => void confirmOnly()}
+                      >
+                        {planBusy === 'confirm' ? '确认中…' : '确认计划'}
+                      </button>
+                      <button
+                        type="button"
+                        className="button primary"
+                        disabled={planBusy !== null || !api.confirmPlan || !api.startTask}
+                        onClick={() => void confirmAndStart()}
+                      >
+                        {planBusy === 'start' ? '启动中…' : '确认并启动'}
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {failedSteps.length > 0 ? (
+                    <div className="msg-status failed">
+                      存在 {failedSteps.length} 个失败步骤，可在上方直接重试。
+                    </div>
+                  ) : null}
+                </div>
+              </article>
+  ) : null
 
   return (
     <AppShell
@@ -717,82 +854,61 @@ export default function IssueCockpit({
                   </form>
                 </div>
               </article>
-            ) : (
-              <article className="msg">
-                <Avatar kind="planner" label="规" />
-                <div className="msg-main">
-                  <div className="msg-head">
-                    <strong>规划</strong>
-                    <span className="role-badge">执行</span>
-                    <span className="msg-time">{planSubmittedLabel}</span>
+            ) : null}
+
+            {threadItems.map((item) => {
+              if (item.kind === 'user') {
+                return (
+                  <article className="msg" key={item.key}>
+                    <Avatar kind="user" label="我" />
+                    <div className="msg-main">
+                      <div className="msg-head">
+                        <strong>我</strong>
+                        <span className="msg-time">{formatTime(item.at)}</span>
+                      </div>
+                      <div className="msg-body">
+                        <p className="msg-requirement">{item.text}</p>
+                      </div>
+                    </div>
+                  </article>
+                )
+              }
+              if (item.kind === 'assistant') {
+                return (
+                  <article className="msg" key={item.key}>
+                    <Avatar kind="planner" label="规" />
+                    <div className="msg-main">
+                      <div className="msg-head">
+                        <strong>规划</strong>
+                        <span className="role-badge">回复</span>
+                        <span className="msg-time">{formatTime(item.at)}</span>
+                      </div>
+                      <div className="msg-body">
+                        <MarkdownView text={item.text} />
+                      </div>
+                    </div>
+                  </article>
+                )
+              }
+              if (item.kind !== 'plan') return null
+              if (activePlan && item.revision === activePlan.revision) {
+                return <Fragment key={item.key}>{latestPlanArticle}</Fragment>
+              }
+              return (
+                <article className="msg" key={item.key}>
+                  <Avatar kind="planner" label="规" />
+                  <div className="msg-main">
+                    <div className="msg-head">
+                      <strong>规划</strong>
+                      <span className="msg-time">{formatTime(item.at)}</span>
+                    </div>
+                    <div className="msg-status">计划版本 r{item.revision}（历史版本）</div>
                   </div>
-                  <div className="msg-status">
-                    <StateDot tone={planMeta ? planMeta.tone : 'muted'} />
-                    {planMeta ? planMeta.label : activePlan.status} · 版本 r{activePlan.revision} ·{' '}
-                    {detail.plan?.stepCount ?? steps.length} 步
-                  </div>
+                </article>
+              )
+            })}
 
-                  {planDetail?.plan?.contentMd ? (
-                    <div className="msg-body">
-                      <MarkdownView text={planDetail.plan.contentMd} />
-                    </div>
-                  ) : null}
-
-                  <ol className="step-list chat-steps">
-                    {steps.map((step) => {
-                      const meta = stepStatusMeta(step.status)
-                      return (
-                        <li
-                          key={step.id}
-                          className={stepCardClass(step.status)}
-                          data-testid={`step-${step.ordinal}`}
-                        >
-                          <div className="step-top">
-                            <span className="step-title">
-                              {step.ordinal}. {step.title}
-                            </span>
-                            <span className="step-status" data-testid={`step-status-${step.ordinal}`}>
-                              <StateTag tone={meta.tone}>{meta.label}</StateTag>
-                            </span>
-                          </div>
-                          <div className="step-meta">
-                            <span>@{step.agentRef}</span>
-                            {stepActions(step)}
-                          </div>
-                        </li>
-                      )
-                    })}
-                  </ol>
-
-                  {planIdle ? (
-                    <div className="msg-actions">
-                      <button
-                        type="button"
-                        className="button ghost"
-                        disabled={planBusy !== null || !api.confirmPlan}
-                        onClick={() => void confirmOnly()}
-                      >
-                        {planBusy === 'confirm' ? '确认中…' : '确认计划'}
-                      </button>
-                      <button
-                        type="button"
-                        className="button primary"
-                        disabled={planBusy !== null || !api.confirmPlan || !api.startTask}
-                        onClick={() => void confirmAndStart()}
-                      >
-                        {planBusy === 'start' ? '启动中…' : '确认并启动'}
-                      </button>
-                    </div>
-                  ) : null}
-
-                  {failedSteps.length > 0 ? (
-                    <div className="msg-status failed">
-                      存在 {failedSteps.length} 个失败步骤，可在上方直接重试。
-                    </div>
-                  ) : null}
-                </div>
-              </article>
-            )}
+            {activePlan && !latestPlanInThread ? latestPlanArticle : null}
 
             {artifacts.length > 0 ? (
               <article className="msg" aria-label="任务产物">
@@ -848,7 +964,7 @@ export default function IssueCockpit({
           className="composer"
           onSubmit={(event) => {
             event.preventDefault()
-            sendMessage()
+            void sendChatMessage()
           }}
         >
           <textarea
@@ -873,7 +989,7 @@ export default function IssueCockpit({
                 <path d="M12 7.5V12l3 2" />
               </svg>
             </button>
-            <button type="submit" className="send-btn" aria-label="发送" disabled={!draft.trim()}>
+            <button type="submit" className="send-btn" aria-label="发送" disabled={!draft.trim() || sending}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M21 3 10.5 13.5" />
                 <path d="M21 3 14 21l-3.5-7.5L3 10z" />

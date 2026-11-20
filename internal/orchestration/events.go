@@ -38,6 +38,8 @@ type stepDoneData struct {
 	InputTokens   int    `json:"input_tokens"`
 	OutputTokens  int    `json:"output_tokens"`
 	DurationMS    int64  `json:"duration_ms"`
+	// Reply 是 Agent 本轮输出的汇总文本（会话展示用）。
+	Reply string `json:"reply"`
 }
 
 type stepFailData struct {
@@ -125,6 +127,14 @@ func (h *EventHandler) complete(ctx context.Context, env protocol.Envelope, data
 			"input_tokens": done.InputTokens, "output_tokens": done.OutputTokens,
 			"duration_ms": done.DurationMS,
 		})
+		// 会话页展示 Agent 本轮回复（与 step.done 分开，避免污染审计时间线）。
+		if reply := strings.TrimSpace(done.Reply); reply != "" {
+			_, _ = mysqlstore.AppendActivity(ctx, h.DB, plan.TaskID, "message.assistant", map[string]any{
+				"text":       truncateRunes(reply, 8000),
+				"step_id":    step.ID,
+				"attempt_no": attempt.AttemptNo,
+			})
+		}
 	}
 	return h.advance(ctx, step.PlanID)
 }

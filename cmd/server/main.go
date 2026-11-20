@@ -242,6 +242,7 @@ func run(cfgPath string) error {
 			r.Get("/issues/{id}", taskHandler.Get)
 			r.Get("/issues/{id}/plans/{rev}", planHandler.Get)
 			r.Post("/issues/{id}/plans", planHandler.Submit)
+			r.Post("/issues/{id}/messages", planHandler.Message)
 			r.Post("/issues/{id}/cancel", cancelHandler.Cancel)
 			r.Post("/steps/{id}/reconcile", reconcileHandler.Reconcile)
 			r.Post("/plans/{id}/confirm", planHandler.Confirm)

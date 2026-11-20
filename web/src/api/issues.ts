@@ -160,6 +160,24 @@ export async function downloadArtifact(taskId: string, artifact: Artifact): Prom
   URL.revokeObjectURL(objectUrl)
 }
 
+export interface SendMessageResult {
+  taskId: string
+  planId: string
+  revision: number
+  status: TaskStatus
+}
+
+/**
+ * 会话追问：后端会把它追加成一轮执行（新计划版本 + 单步骤），
+ * 并自动确认、启动；Agent 的回复随后写入事件流。
+ */
+export function sendMessage(taskId: string, content: string): Promise<SendMessageResult> {
+  return request<SendMessageResult>(`/issues/${encodeURIComponent(taskId)}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ content }),
+  })
+}
+
 export function fetchIssues(limit = 50): Promise<Task[]> {
   return request<Task[]>(`/issues?limit=${limit}`)
 }

@@ -127,6 +127,44 @@ describe('IssueCockpit', () => {
     expect(screen.queryAllByText(/步骤已派发/)).toHaveLength(1)
   })
 
+  it('会话发送追问调用消息接口并刷新', async () => {
+    const api = makeApi({
+      fetchIssue: vi.fn().mockResolvedValue(makeDetail('completed')),
+      sendMessage: vi.fn().mockResolvedValue({ taskId: 'task-1', planId: 'p', revision: 3, status: 'executing' }),
+    })
+    const user = userEvent.setup()
+    renderCockpit({
+      taskId: 'task-1',
+      api,
+      eventsFetcher: streamOf([{ events: [], nextSeq: 0 }]),
+    })
+
+    const input = await screen.findByLabelText('会话输入')
+    await user.type(input, '写好了吗？')
+    await user.click(screen.getByRole('button', { name: '发送' }))
+
+    await waitFor(() => {
+      expect(api.sendMessage).toHaveBeenCalledWith('task-1', '写好了吗？')
+    })
+    expect(api.fetchIssue).toHaveBeenCalledTimes(2)
+  })
+
+  it('展示会话中的人机消息', async () => {
+    const api = makeApi()
+    const page: EventPage = {
+      events: [
+        { seq: 1, eventId: 'e1', kind: 'plan.submitted', payload: { revision: 2 }, createdAt: '2026-01-01T00:00:00Z' },
+        { seq: 2, eventId: 'e2', kind: 'message.user', payload: { text: '写好了吗？' }, createdAt: '2026-01-01T00:01:00Z' },
+        { seq: 3, eventId: 'e3', kind: 'message.assistant', payload: { text: '已经写好了。' }, createdAt: '2026-01-01T00:02:00Z' },
+      ],
+      nextSeq: 3,
+    }
+    renderCockpit({ taskId: 'task-1', api, eventsFetcher: streamOf([page]) })
+
+    expect(await screen.findByText('写好了吗？')).toBeInTheDocument()
+    expect(await screen.findByText('已经写好了。')).toBeInTheDocument()
+  })
+
   it('点击重试调用接口并刷新状态', async () => {
     const api = makeApi()
     const user = userEvent.setup()
