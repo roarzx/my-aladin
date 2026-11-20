@@ -36,6 +36,8 @@
 - 计划链路已删除：`plans/plan_steps/attempts/step_dependencies/confirmations`、
   `PlanRunner/Retry/Reconcile/Watchdog`、前端计划表单与 `/plans/*` 端点全部移除；
   `internal/orchestration` 只剩小队部分（移至 `internal/squadrunner`）。
+- 创建即执行：Issue 落库后立刻用需求正文开始第一轮，失败（例如机器离线）时保持
+  `pending`，驾驶舱保留手动「开始执行」作为兜底。
 - 一轮执行记一条 `issue_runs`：`start_issue_turn` 派发，`turn_done/turn_fail` 收尾；
   会话行（`sessions.kind='issue'`）保存 `acp_session_id`，下一轮用 `session/load` 续上。
 - 「Agent 一轮跑完但没上报」时平台不做任何动作（保持进行中），由用户或下一轮对话驱动；

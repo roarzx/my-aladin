@@ -153,6 +153,25 @@ func (s *Service) StartTurn(ctx context.Context, taskID, prompt string) (domain.
 	return run, nil
 }
 
+// StartFromRequirement 用 Issue 自带的需求开始第一轮（创建后自动执行）。
+func (s *Service) StartFromRequirement(ctx context.Context, taskID string) (domain.IssueRun, error) {
+	task, err := mysqlstore.GetTask(ctx, s.DB, taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.IssueRun{}, errcode.New(errcode.NotFound, "任务不存在")
+	}
+	if err != nil {
+		return domain.IssueRun{}, errcode.New(errcode.UpstreamUnavailable, "读取任务失败")
+	}
+	prompt := task.Requirement
+	if strings.TrimSpace(prompt) == "" {
+		prompt = task.Name
+	}
+	if task.InformDoc != "" {
+		prompt += "\n\n补充说明：\n" + task.InformDoc
+	}
+	return s.StartTurn(ctx, taskID, prompt)
+}
+
 // Message 把用户的一条消息交给 Agent，形成新一轮执行。
 func (s *Service) Message(ctx context.Context, taskID, content string) (domain.IssueRun, error) {
 	content = strings.TrimSpace(content)

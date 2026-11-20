@@ -24,12 +24,13 @@ import (
 	"github.com/roarzx/my-aladin/internal/auth"
 	"github.com/roarzx/my-aladin/internal/buildinfo"
 	"github.com/roarzx/my-aladin/internal/config"
+	"github.com/roarzx/my-aladin/internal/domain"
 	"github.com/roarzx/my-aladin/internal/flow"
 	"github.com/roarzx/my-aladin/internal/health"
 	"github.com/roarzx/my-aladin/internal/httpapi"
+	"github.com/roarzx/my-aladin/internal/issue"
 	"github.com/roarzx/my-aladin/internal/machine"
 	"github.com/roarzx/my-aladin/internal/observability"
-	"github.com/roarzx/my-aladin/internal/issue"
 	"github.com/roarzx/my-aladin/internal/session"
 	"github.com/roarzx/my-aladin/internal/squadrunner"
 	mysqlstore "github.com/roarzx/my-aladin/internal/store/mysql"
@@ -129,6 +130,15 @@ func run(cfgPath string) error {
 		Owner: "server-squad", Log: slog.Default(),
 	}
 	issueService := &issue.Service{DB: db, Runtime: hub, Log: slog.Default()}
+	// 创建即执行：Issue 建好后立刻把需求交给 Agent，用户不用再点「开始」。
+	// 机器离线等派发失败只记日志、保持 pending，驾驶舱里仍可手动开始。
+	taskService.OnCreated = func(ctx context.Context, created *domain.Task) {
+		runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		if _, err := issueService.StartFromRequirement(runCtx, created.ID); err != nil {
+			slog.Warn("创建后自动开始失败", "task", created.ID, "err", err)
+		}
+	}
 	issueHandler := &issue.Handler{
 		DB: db, Members: &mysqlstore.WorkspaceStore{DB: db}, Service: issueService,
 	}
@@ -192,10 +202,8 @@ func run(cfgPath string) error {
 				r.Post("/flow-run-nodes/{id}/cancel-ack", flowHandler.CancelAck)
 				r.Post("/artifacts", artifactHandler.Upload)
 				// Agent 侧 Issue 接口：aladdin openapi issue ...
-				// 用一个不带 OnCreated 的服务实例：CLI 建的 Issue 不自动拉起规划会话，
-				// 什么时候开始干活由 Agent 自己（或后续的单会话派发）决定。
-				cliTaskService := &task.Service{DB: db}
-				cliIssueHandler := &task.CLIHandler{DB: db, Service: cliTaskService}
+				// 与用户侧同一个服务实例：CLI 建的 Issue 同样创建即执行。
+				cliIssueHandler := &task.CLIHandler{DB: db, Service: taskService}
 				r.Route("/issues", func(r chi.Router) {
 					r.Get("/", cliIssueHandler.List)
 					r.Post("/", cliIssueHandler.Create)

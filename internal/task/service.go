@@ -205,6 +205,10 @@ func (s *Service) Create(ctx context.Context, creatorID uint64, workspaceID stri
 	})
 	if s.OnCreated != nil {
 		s.OnCreated(ctx, &task)
+		// OnCreated 可能已经派发执行（创建即执行），回读一次让调用方看到真实状态。
+		if fresh, err := mysqlstore.GetTask(ctx, s.DB, task.ID); err == nil {
+			task = fresh
+		}
 	}
 	return &task, nil
 }

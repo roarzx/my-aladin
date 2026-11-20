@@ -16,7 +16,7 @@ Web / CLI / API
    Daemon（Go）── ACP Agent（Claude Code 等）
 ```
 
-- **主路径已打通**：注册机器 → 配置 Agent → 创建 Issue → 开始 → 真实 Claude Code
+- **主路径已打通**：注册机器 → 配置 Agent → 创建 Issue（创建即执行）→ 真实 Claude Code
   在长会话里推进 → 自动 commit/push → 生成 GitHub PR（详见 `docs/evidence/MAIN-PATH/`）
 - 状态：`pending → executing → paused/completed/cancelled/failed`，由 Agent 调用
   `aladdin openapi issue update-status` 决定，平台不替 Agent 判定完成

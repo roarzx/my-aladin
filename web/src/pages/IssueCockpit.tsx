@@ -451,7 +451,9 @@ export default function IssueCockpit({ taskId, api, eventsFetcher }: IssueCockpi
                 <div className="empty-inline">
                   {running
                     ? 'Agent 正在执行，输出会实时出现在这里。'
-                    : '还没有对话，点「继续执行」或直接发一条消息。'}
+                    : task.status === 'pending'
+                      ? '创建后会自动开始；如果没有（比如机器离线），点右上角「开始执行」。'
+                      : '还没有对话，直接发一条消息继续。'}
                 </div>
               ) : (
                 thread.map((item) => (
