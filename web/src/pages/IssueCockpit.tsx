@@ -435,7 +435,11 @@ export default function IssueCockpit({ taskId, api, eventsFetcher }: IssueCockpi
         </div>
 
         {tab === 'records' ? (
-          <AuditTimeline events={stream.events} connected={stream.connected} />
+          <div className="cockpit-shell">
+            <div className="thread records" data-testid="records-pane">
+              <AuditTimeline events={stream.events} connected={stream.connected} />
+            </div>
+          </div>
         ) : (
           <div className="cockpit-shell">
             <div className="thread">

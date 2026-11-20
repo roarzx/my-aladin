@@ -43,6 +43,19 @@ function payloadOf(event: StreamEvent): Record<string, unknown> {
   return {}
 }
 
+const STATUS_NAMES: Record<string, string> = {
+  pending: '待开始',
+  executing: '执行中',
+  paused: '已阻塞',
+  completed: '已完成',
+  cancelled: '已取消',
+  failed: '已失败',
+}
+
+function statusLabel(value: string): string {
+  return STATUS_NAMES[value] ?? value
+}
+
 function text(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
@@ -72,6 +85,61 @@ interface Group {
   events: StreamEvent[]
 }
 
+/** 一条时间线条目：单个事件，或折叠后的连续同名工具调用。 */
+type TimelineItem =
+  | { kind: 'event'; key: string; event: StreamEvent }
+  | {
+      kind: 'tool-group'
+      key: string
+      title: string
+      events: StreamEvent[]
+      durationMs: number
+    }
+
+/** 连续出现同名工具调用时折叠，避免「Edit 同一个文件 ×20」铺满整屏。 */
+function buildItems(events: StreamEvent[]): TimelineItem[] {
+  const items: TimelineItem[] = []
+  let run: StreamEvent[] = []
+
+  const flush = () => {
+    if (run.length === 0) return
+    if (run.length < 3) {
+      for (const event of run) {
+        items.push({ kind: 'event', key: event.eventId, event })
+      }
+    } else {
+      const duration = run.reduce((sum, event) => sum + num(payloadOf(event).duration_ms), 0)
+      items.push({
+        kind: 'tool-group',
+        key: `group-${run[0].eventId}`,
+        title: eventTitle(run[0]),
+        events: run,
+        durationMs: duration,
+      })
+    }
+    run = []
+  }
+
+  for (const event of events) {
+    const isSameTool =
+      event.kind === 'tool.call' &&
+      run.length > 0 &&
+      eventTitle(event) === eventTitle(run[0])
+    if (isSameTool) {
+      run.push(event)
+      continue
+    }
+    flush()
+    if (event.kind === 'tool.call') {
+      run = [event]
+    } else {
+      items.push({ kind: 'event', key: event.eventId, event })
+    }
+  }
+  flush()
+  return items
+}
+
 function buildGroups(events: StreamEvent[]): Group[] {
   const byRun = new Map<string, StreamEvent[]>()
   const topLevel: StreamEvent[] = []
@@ -93,7 +161,8 @@ function buildGroups(events: StreamEvent[]): Group[] {
     groups.push({ key: runId, title: `第 ${index} 轮执行`, events: list })
   }
   if (topLevel.length > 0) {
-    groups.push({ key: '__top__', title: '任务', events: topLevel })
+    // 任务级事件（创建、状态上报）放在最前面
+    groups.unshift({ key: '__top__', title: '任务', events: topLevel })
   }
   return groups
 }
@@ -180,7 +249,11 @@ function eventDetail(event: StreamEvent): ReactNode {
       const reason = text(payload.reason)
       return (
         <>
-          {from && to ? <span className="audit-chip">{from} → {to}</span> : null}
+          {from && to ? (
+            <span className="audit-chip">
+              {statusLabel(from)} → {statusLabel(to)}
+            </span>
+          ) : null}
           {reason ? <span className="audit-reason">{reason}</span> : null}
         </>
       )
@@ -282,12 +355,48 @@ export default function AuditTimeline({ events, connected }: AuditTimelineProps)
 
                 {isCollapsed ? null : (
                   <ol className="audit-items">
-                    {group.events.map((event) => {
+                    {buildItems(group.events).map((item) => {
+                      if (item.kind === 'tool-group') {
+                        return (
+                          <li
+                            className="audit-item done audit-item-group"
+                            key={item.key}
+                            data-testid={`event-${item.events[0].seq}`}
+                          >
+                            <span className="audit-dot" aria-hidden />
+                            <div className="audit-item-main">
+                              <div className="audit-item-title">
+                                <span className="audit-item-name">{item.title}</span>
+                                <span className="audit-group-count">×{item.events.length}</span>
+                                <span className="audit-item-time">
+                                  {formatTime(item.events[0].createdAt)} –{' '}
+                                  {formatTime(item.events[item.events.length - 1].createdAt)}
+                                </span>
+                              </div>
+                              <div className="audit-item-detail">
+                                连续 {item.events.length} 次 · 共 {formatDuration(item.durationMs)}
+                              </div>
+                              <details className="audit-raw">
+                                <summary>展开每一次</summary>
+                                <ol className="audit-subitems">
+                                  {item.events.map((event) => (
+                                    <li key={event.eventId}>
+                                      <span className="audit-item-time">{formatTime(event.createdAt)}</span>
+                                      <span>{eventDetail(event) || '成功'}</span>
+                                    </li>
+                                  ))}
+                                </ol>
+                              </details>
+                            </div>
+                          </li>
+                        )
+                      }
+                      const event = item.event
                       const itemTone = eventTone(event)
                       return (
                         <li
                           className={`audit-item ${itemTone}`}
-                          key={event.eventId}
+                          key={item.key}
                           data-testid={`event-${event.seq}`}
                         >
                           <span className="audit-dot" aria-hidden />
