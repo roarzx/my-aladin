@@ -67,6 +67,15 @@ const ROUTES: Record<string, ComponentType> = {
 function Routed() {
   const { pathname, query } = useRouter()
 
+  // 兼容手输/粘贴的 /issues 路径（接口也叫 /issues，容易顺手写成这个）。
+  if (pathname === '/issues' || pathname === '/issues/') {
+    return <IssueList />
+  }
+  const issuePath = pathname.match(/^\/issues\/([^/]+)\/?$/)
+  if (issuePath) {
+    return <IssueCockpit taskId={decodeURIComponent(issuePath[1])} />
+  }
+
   if (pathname === '/task/detail') {
     const taskId = query.get('id') ?? query.get('taskId') ?? ''
     return <IssueCockpit taskId={taskId} />

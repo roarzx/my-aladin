@@ -386,7 +386,7 @@ export default function IssueCockpit({ taskId, api, eventsFetcher }: IssueCockpi
         <header className="cockpit-header">
           <div>
             <div className="cockpit-title">
-              <Link to="/issues">← Issue</Link>
+              <Link to="/task/list">← Issue</Link>
               <span data-testid="task-status">
                 <StateTag tone={STATUS_TONES[task.status]}>{STATUS_LABELS[task.status]}</StateTag>
               </span>
