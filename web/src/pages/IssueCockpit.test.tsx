@@ -6,7 +6,10 @@ import type { EventPage, IssueDetail, IssueRun } from '../api/issues'
 import { RouterProvider } from '../router'
 import IssueCockpit, { type CockpitApi } from './IssueCockpit'
 
-function makeDetail(status: IssueDetail['task']['status'] = 'executing'): IssueDetail {
+function makeDetail(
+  status: IssueDetail['task']['status'] = 'executing',
+  latestRun: IssueRun | null = null,
+): IssueDetail {
   return {
     task: {
       id: 'task-1',
@@ -19,7 +22,7 @@ function makeDetail(status: IssueDetail['task']['status'] = 'executing'): IssueD
       createdAt: '2026-01-01T00:00:00Z',
       updatedAt: '2026-01-01T00:00:00Z',
     },
-    latestRun: null,
+    latestRun,
     acceptance: null,
     agents: [{ ref: 'a1', agentId: 'agent-1', name: 'Claude', role: 'planner' }],
   }
@@ -67,11 +70,58 @@ function renderCockpit(props: Parameters<typeof IssueCockpit>[0]) {
 
 describe('IssueCockpit', () => {
   it('渲染标题与任务状态', async () => {
-    renderCockpit({ taskId: 'task-1', api: makeApi() })
+    const api = makeApi({
+      fetchIssue: vi.fn().mockResolvedValue(makeDetail('executing', makeRun({ status: 'running' }))),
+    })
+    renderCockpit({ taskId: 'task-1', api })
 
     expect(await screen.findByRole('heading', { name: /修复登录/ })).toBeInTheDocument()
     expect(screen.getByTestId('task-status')).toHaveTextContent('执行中')
     expect(screen.getByRole('button', { name: '取消' })).toBeInTheDocument()
+  })
+
+  it('上一轮失败时不再假装执行中：可继续、可发消息', async () => {
+    const api = makeApi({
+      fetchIssue: vi.fn().mockResolvedValue(makeDetail('executing', makeRun({ status: 'failed', errorClass: 'network' }))),
+      startIssue: vi.fn().mockResolvedValue(makeRun()),
+    })
+    const user = userEvent.setup()
+    renderCockpit({ taskId: 'task-1', api, eventsFetcher: streamOf([{ events: [], nextSeq: 0 }]) })
+
+    expect(await screen.findByText('上轮失败')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument()
+    const input = screen.getByLabelText('会话输入')
+    expect(input).not.toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: '继续执行' }))
+    await waitFor(() => expect(api.startIssue).toHaveBeenCalledWith('task-1'))
+  })
+
+  it('把失败翻译成人话并给下一步动作', async () => {
+    const page: EventPage = {
+      events: [
+        {
+          seq: 1,
+          eventId: 'e1',
+          kind: 'turn.failed',
+          payload: { reason: 'acp: prompt 超时', error_class: 'network', uncertain: true, run_id: 'run-1' },
+          createdAt: '2026-01-01T00:01:00Z',
+        },
+      ],
+      nextSeq: 1,
+    }
+    renderCockpit({
+      taskId: 'task-1',
+      api: makeApi({
+        fetchIssue: vi.fn().mockResolvedValue(makeDetail('completed', makeRun({ status: 'failed', errorClass: 'network' }))),
+      }),
+      eventsFetcher: streamOf([page]),
+    })
+
+    expect(await screen.findByText('本轮超时或连接中断，平台已停止这一轮')).toBeInTheDocument()
+    expect(screen.queryByText(/acp: prompt 超时/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试这一轮' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '查看记录' })).toBeInTheDocument()
   })
 
   it('执行中禁用输入，结束后可继续发消息', async () => {

@@ -69,6 +69,27 @@ const STATUS_TONES: Record<TaskStatus, TagTone> = {
   failed: 'failed',
 }
 
+/** 把执行侧的错误分类翻译成一句人话。 */
+function failureSummary(errorClass: string): string {
+  switch (errorClass) {
+    case 'network':
+    case 'timeout':
+      return '本轮超时或连接中断，平台已停止这一轮'
+    case 'runtime':
+      return 'Agent 运行环境出错，这一轮没能继续'
+    case 'tool':
+      return '工具调用失败，这一轮被中断'
+    case 'verification':
+      return 'Agent 没能以正常结束完成这一轮'
+    case 'permission':
+      return '权限不足，这一轮被中断'
+    case 'dispatch':
+      return '消息没有送达 Agent'
+    default:
+      return '这一轮没能正常结束'
+  }
+}
+
 /** 会话里的条目：用户消息、Agent 回复、状态变更、失败与提问。 */
 type ThreadItem =
   | { key: string; kind: 'user' | 'assistant'; text: string; at: string }
@@ -162,7 +183,13 @@ function buildThread(events: { seq: number; eventId: string; kind: string; paylo
   return items
 }
 
-function ThreadBubble({ item }: { item: ThreadItem }): ReactNode {
+function ThreadBubble({
+  item,
+  actions,
+}: {
+  item: ThreadItem
+  actions?: ReactNode
+}): ReactNode {
   if (item.kind === 'user') {
     return (
       <article className="msg" data-testid="thread-user">
@@ -210,12 +237,14 @@ function ThreadBubble({ item }: { item: ThreadItem }): ReactNode {
   }
   if (item.kind === 'failed') {
     return (
-      <div className="thread-system failed" data-testid="thread-failed">
-        <StateDot tone="failed" />
-        <span>
-          本轮执行失败{item.errorClass ? `（${item.errorClass}）` : ''}：{item.reason}
-        </span>
-        <span className="msg-time">{formatTime(item.at)}</span>
+      <div className="thread-failure" data-testid="thread-failed">
+        <div className="thread-failure-head">
+          <StateDot tone="failed" />
+          <strong>{failureSummary(item.errorClass)}</strong>
+          <span className="msg-time">{formatTime(item.at)}</span>
+        </div>
+        <p>这一轮的改动可能还在工作区；确认状态后再决定继续还是重来。</p>
+        {actions ? <div className="thread-failure-actions">{actions}</div> : null}
       </div>
     )
   }
@@ -301,10 +330,13 @@ export default function IssueCockpit({ taskId, api, eventsFetcher }: IssueCockpi
   }
 
   const task = detail.task
-  const running = task.status === 'executing'
-  const terminal = task.status === 'cancelled' || task.status === 'failed'
   const latestRun: IssueRun | null = detail.latestRun ?? null
-  const canStart = !running && !terminal
+  // 有没有「正在跑的一轮」由执行记录决定，任务状态可能因为上一轮失败还停在 executing。
+  const runActive = latestRun?.status === 'dispatched' || latestRun?.status === 'running'
+  const interrupted = latestRun?.status === 'failed'
+  const running = runActive
+  const terminal = task.status === 'cancelled'
+  const canStart = !runActive && !terminal
 
   const runAction = async (fn: () => Promise<unknown>, okMessage: string) => {
     setBusy(true)
@@ -343,8 +375,8 @@ export default function IssueCockpit({ taskId, api, eventsFetcher }: IssueCockpi
   }
 
   return (
-    <AppShell title={task.name} breadcrumb="Issue">
-      <div className="cockpit-page">
+    <AppShell title={task.name} breadcrumb="Issue" className="cockpit-page">
+      <div className="cockpit-page-inner">
         <header className="cockpit-header">
           <div>
             <div className="cockpit-title">
@@ -358,6 +390,7 @@ export default function IssueCockpit({ taskId, api, eventsFetcher }: IssueCockpi
               <span>更新于 {formatTime(task.updatedAt)}</span>
               {task.planBranch ? <span className="mono">{task.planBranch}</span> : null}
               {detail.agents?.[0] ? <span>Agent · {detail.agents[0].name}</span> : null}
+              {interrupted ? <span className="task-run failed">上轮失败</span> : null}
             </div>
           </div>
           <div className="button-row">
@@ -379,7 +412,7 @@ export default function IssueCockpit({ taskId, api, eventsFetcher }: IssueCockpi
             type="button"
             role="tab"
             aria-selected={tab === 'chat'}
-            className={tab === 'chat' ? 'active' : ''}
+            className={`cockpit-tab${tab === 'chat' ? ' active' : ''}`}
             onClick={() => setTab('chat')}
           >
             会话
@@ -388,7 +421,7 @@ export default function IssueCockpit({ taskId, api, eventsFetcher }: IssueCockpi
             type="button"
             role="tab"
             aria-selected={tab === 'records'}
-            className={tab === 'records' ? 'active' : ''}
+            className={`cockpit-tab${tab === 'records' ? ' active' : ''}`}
             onClick={() => setTab('records')}
           >
             记录
@@ -400,28 +433,44 @@ export default function IssueCockpit({ taskId, api, eventsFetcher }: IssueCockpi
         ) : (
           <div className="cockpit-shell">
             <div className="thread">
-              <article className="msg msg-requirement" data-testid="thread-requirement">
+              <article className="thread-requirement" data-testid="thread-requirement">
                 <div className="msg-head">
                   <span className="role-badge">需求</span>
                   <span className="msg-time">{formatTime(task.createdAt)}</span>
                 </div>
-                <div className="msg-body">{task.name}</div>
+                <div className="thread-requirement-body">{task.requirement || task.name}</div>
               </article>
 
               {thread.length === 0 ? (
                 <div className="empty-inline">
-                  {running ? 'Agent 正在执行，稍后会出现过程记录。' : '还没有对话，点「开始执行」或直接发一条消息。'}
+                  {running
+                    ? 'Agent 正在执行，输出会实时出现在这里。'
+                    : '还没有对话，点「继续执行」或直接发一条消息。'}
                 </div>
               ) : (
-                thread.map((item) => <ThreadBubble key={item.key} item={item} />)
+                thread.map((item) => (
+                  <ThreadBubble
+                    key={item.key}
+                    item={item}
+                    actions={
+                      item.kind === 'failed' && canStart ? (
+                        <>
+                          <button type="button" className="button primary small" onClick={onStart} disabled={busy}>
+                            重试这一轮
+                          </button>
+                          <button
+                            type="button"
+                            className="button ghost small"
+                            onClick={() => setTab('records')}
+                          >
+                            查看记录
+                          </button>
+                        </>
+                      ) : null
+                    }
+                  />
+                ))
               )}
-
-              {latestRun && latestRun.status === 'failed' && !running ? (
-                <div className="thread-system failed">
-                  <StateDot tone="failed" />
-                  <span>上一轮执行失败：{latestRun.detail || latestRun.errorClass || '未知原因'}</span>
-                </div>
-              ) : null}
 
               {artifacts.length > 0 ? (
                 <section className="artifact-panel" data-testid="artifacts">

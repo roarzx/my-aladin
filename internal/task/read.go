@@ -137,7 +137,8 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		"task": taskView{
 			ID: task.ID, WorkspaceID: task.WorkspaceID, Name: task.Name,
 			Mode: string(task.Mode), Status: string(task.Status), Version: task.Version,
-			PlanBranch: task.PlanBranch, CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
+			PlanBranch: task.PlanBranch, Requirement: task.Requirement,
+			CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
 			CancelAt: task.CancelRequestedAt,
 		},
 		"latestRun":    latestRun,
