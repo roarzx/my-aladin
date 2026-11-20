@@ -1537,3 +1537,22 @@
 }
 
 .audit-subitems .audit-item-time { flex: none; min-width: 56px; }
+
+/* 工具调用的入参摘要（命令 / 文件路径） */
+.audit-tool-detail {
+  display: block;
+  max-width: 100%;
+  margin-bottom: 2px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: #334155;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-note { color: var(--muted); }

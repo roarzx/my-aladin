@@ -95,16 +95,20 @@ func FinishIssueRun(ctx context.Context, ex Executor, id string, from []domain.R
 	to domain.RunStatus, reply, errorClass, detail string) (bool, error) {
 	query := `UPDATE issue_runs SET status = ?, reply = NULLIF(?, ''),
 		error_class = NULLIF(?, ''), detail = NULLIF(?, '')
-		WHERE id = ? AND status IN (`
+		WHERE id = ?`
 	args := []any{string(to), reply, errorClass, detail, id}
-	for i, status := range from {
-		if i > 0 {
-			query += ", "
+	// from 为空表示不限当前状态（调用方自己做前置校验）。
+	if len(from) > 0 {
+		query += " AND status IN ("
+		for i, status := range from {
+			if i > 0 {
+				query += ", "
+			}
+			query += "?"
+			args = append(args, string(status))
 		}
-		query += "?"
-		args = append(args, string(status))
+		query += ")"
 	}
-	query += ")"
 
 	res, err := ex.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -144,4 +148,27 @@ func scanIssueRun(row rowScanner) (domain.IssueRun, error) {
 	}
 	run.Status = domain.RunStatus(status)
 	return run, nil
+}
+
+// ListActiveRunsByMachine 列出某台机器上仍未收尾的执行（daemon 重启后用于清理）。
+func ListActiveRunsByMachine(ctx context.Context, ex Executor, machineID string) ([]domain.IssueRun, error) {
+	rows, err := ex.QueryContext(ctx, `SELECT `+issueRunColumns+`
+		FROM issue_runs
+		WHERE status IN ('dispatched','running')
+		  AND agent_id IN (SELECT id FROM agents WHERE machine_id = ?)
+		ORDER BY created_at ASC LIMIT 100`, machineID)
+	if err != nil {
+		return nil, fmt.Errorf("列出未收尾执行: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []domain.IssueRun
+	for rows.Next() {
+		run, err := scanIssueRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, run)
+	}
+	return out, rows.Err()
 }

@@ -15,10 +15,11 @@ type updateParams struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
-		ToolCallID string `json:"toolCallId"`
-		Title      string `json:"title"`
-		Kind       string `json:"kind"`
-		Status     string `json:"status"`
+		ToolCallID string          `json:"toolCallId"`
+		Title      string          `json:"title"`
+		Kind       string          `json:"kind"`
+		Status     string          `json:"status"`
+		RawInput   json.RawMessage `json:"rawInput"`
 	} `json:"update"`
 }
 
@@ -46,12 +47,14 @@ func NormalizeUpdate(params json.RawMessage) (agentevent.Event, bool) {
 		event.Title = p.Update.Title
 		event.ToolKind = p.Update.Kind
 		event.Status = p.Update.Status
+		event.Input = p.Update.RawInput
 	case "tool_call_update":
 		event.Kind = agentevent.KindToolUpdate
 		event.ToolCallID = p.Update.ToolCallID
 		event.Title = p.Update.Title
 		event.ToolKind = p.Update.Kind
 		event.Status = p.Update.Status
+		event.Input = p.Update.RawInput
 	case "plan":
 		event.Kind = agentevent.KindPlan
 	default:

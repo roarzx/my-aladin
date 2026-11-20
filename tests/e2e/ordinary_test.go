@@ -283,3 +283,28 @@ func contains(items []string, want string) bool {
 	}
 	return false
 }
+
+func TestFailStaleRunsUnblocksIssue(t *testing.T) {
+	env := setupIssue(t)
+	ctx := context.Background()
+	taskID := env.createIssue(t, "daemon 重启后的收尾")
+
+	run, err := env.service.StartTurn(ctx, taskID, "干活")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 模拟 daemon 进程消失：执行记录停在进行中，没人会来收尾。
+	if _, err := env.db.Exec(`UPDATE issue_runs SET status = 'running' WHERE id = ?`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.service.StartTurn(ctx, taskID, "再开一轮"); err == nil {
+		t.Fatal("有未收尾执行时应拒绝新的一轮")
+	}
+
+	if failed := env.service.FailStaleRuns(ctx, env.machine); failed != 1 {
+		t.Fatalf("应清理 1 条未收尾执行，实际 %d", failed)
+	}
+	if _, err := env.service.StartTurn(ctx, taskID, "再开一轮"); err != nil {
+		t.Fatalf("清理后应能继续: %v", err)
+	}
+}

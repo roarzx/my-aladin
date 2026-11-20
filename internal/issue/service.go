@@ -281,6 +281,36 @@ func (s *Service) ApplyTurnFail(ctx context.Context, executionID string, data ma
 	return nil
 }
 
+// FailStaleRuns 把某台机器上没收尾的执行标记为失败。
+//
+// daemon 重启（或进程被杀）后，那些执行不会再回来；不清掉的话
+// 对应 Issue 会一直「已有执行进行中」，连消息都发不出去。
+func (s *Service) FailStaleRuns(ctx context.Context, machineID string) int {
+	runs, err := mysqlstore.ListActiveRunsByMachine(ctx, s.DB, machineID)
+	if err != nil {
+		s.log().Warn("清理未收尾执行失败", "machine", machineID, "err", err)
+		return 0
+	}
+	reason := "执行进程已不在（daemon 重启），本轮中断"
+	failed := 0
+	for _, run := range runs {
+		ok, err := mysqlstore.FinishIssueRun(ctx, s.DB, run.ID,
+			[]domain.RunStatus{domain.RunDispatched, domain.RunRunning},
+			domain.RunFailed, "", "runtime", reason)
+		if err != nil || !ok {
+			continue
+		}
+		failed++
+		_, _ = mysqlstore.AppendActivity(ctx, s.DB, run.TaskID, "turn.failed", map[string]any{
+			"run_id": run.ID, "reason": reason, "error_class": "runtime", "uncertain": true,
+		})
+	}
+	if failed > 0 {
+		s.log().Info("已清理未收尾执行", "machine", machineID, "count", failed)
+	}
+	return failed
+}
+
 // MarkRunning 在收到首帧流式输出时把执行推进为 running。
 func (s *Service) MarkRunning(ctx context.Context, executionID string) {
 	if err := mysqlstore.MarkRunning(ctx, s.DB, executionID); err != nil {

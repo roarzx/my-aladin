@@ -20,12 +20,14 @@ const (
 
 // Event 是一条归一化事件。
 type Event struct {
-	SessionID  string          `json:"session_id"`
-	Kind       Kind            `json:"kind"`
-	Text       string          `json:"text,omitempty"`
-	ToolCallID string          `json:"tool_call_id,omitempty"`
-	Title      string          `json:"title,omitempty"`
-	ToolKind   string          `json:"tool_kind,omitempty"`
-	Status     string          `json:"status,omitempty"`
-	Raw        json.RawMessage `json:"raw,omitempty"`
+	SessionID  string `json:"session_id"`
+	Kind       Kind   `json:"kind"`
+	Text       string `json:"text,omitempty"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	Title      string `json:"title,omitempty"`
+	ToolKind   string `json:"tool_kind,omitempty"`
+	Status     string `json:"status,omitempty"`
+	// Input 是工具调用的入参（ACP rawInput），用于审计与展示。
+	Input json.RawMessage `json:"input,omitempty"`
+	Raw   json.RawMessage `json:"raw,omitempty"`
 }

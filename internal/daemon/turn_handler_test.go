@@ -454,3 +454,38 @@ func containsEnv(env []string, prefix string) bool {
 	}
 	return false
 }
+
+func TestSummarizeToolInput(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"bash", `{"command":"python3 -I hello.py","description":"跑一下"}`, "python3 -I hello.py"},
+		{"bash argv", `{"command":["go","test","./..."]}`, "go test ./..."},
+		{"write", `{"file_path":"/tmp/a.html","content":"<html>…"}`, "/tmp/a.html"},
+		{"read", `{"path":"internal/x.go"}`, "internal/x.go"},
+		{"web", `{"url":"https://example.com"}`, "https://example.com"},
+		{"fallback", `{"foo":"bar"}`, `{"foo":"bar"}`},
+		{"empty", ``, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := summarizeToolInput(json.RawMessage(tc.raw))
+			if got != tc.want {
+				t.Fatalf("summarize = %q，期望 %q", got, tc.want)
+			}
+		})
+	}
+
+	// 凭据必须脱敏后才进事件。
+	got := summarizeToolInput(json.RawMessage(`{"command":"curl -H 'Authorization: Bearer sk-abcdef123456' https://x"}`))
+	if strings.Contains(got, "sk-abcdef123456") {
+		t.Fatalf("命令里的凭据未脱敏: %q", got)
+	}
+	// 超长输入截断。
+	long := summarizeToolInput(json.RawMessage(`{"command":"` + strings.Repeat("a", 500) + `"}`))
+	if len([]rune(long)) > 301 {
+		t.Fatalf("超长命令未截断: %d", len([]rune(long)))
+	}
+}

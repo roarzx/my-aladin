@@ -162,6 +162,8 @@ func (h *TurnHandler) run(ctx context.Context, params turnParams, sender Sender)
 	result, err := session.Prompt(ctx, h.promptWithSystem(params), func(event agentevent.Event) {
 		switch event.Kind {
 		case agentevent.KindToolCall, agentevent.KindToolUpdate:
+			h.log().Debug("ACP 工具事件", "kind", event.Kind, "tool", event.ToolCallID,
+				"status", event.Status, "title", event.Title)
 			handleTool(tools, emitWork, event)
 			return
 		case agentevent.KindNotice:
@@ -245,6 +247,7 @@ type toolState struct {
 	startedAt time.Time
 	title     string
 	kind      string
+	input     json.RawMessage
 }
 
 // maxReplyBytes 限制随 turn_done 回传的助手文本长度（会话展示用）。
@@ -255,7 +258,8 @@ func handleTool(tools map[string]*toolState, emitWork func(string, map[string]an
 		return
 	}
 	state := tools[event.ToolCallID]
-	if state == nil {
+	first := state == nil
+	if first {
 		state = &toolState{startedAt: time.Now()}
 		tools[event.ToolCallID] = state
 	}
@@ -265,18 +269,100 @@ func handleTool(tools map[string]*toolState, emitWork func(string, map[string]an
 	if event.ToolKind != "" {
 		state.kind = event.ToolKind
 	}
+	if len(event.Input) > 0 && len(state.input) == 0 {
+		state.input = event.Input
+	}
 	status := strings.ToLower(strings.TrimSpace(event.Status))
-	if status != "completed" && status != "failed" {
-		return
+	final := status == "completed" || status == "failed"
+	if !final {
+		// 部分适配器（尤其 session/load 之后）不给终态，只补一帧不带
+		// title/status 的结果更新：把它当作「这次调用结束了」。
+		if first || event.Title != "" || status != "" {
+			return
+		}
+		final = true
+		status = "completed"
 	}
 	delete(tools, event.ToolCallID)
-	emitWork("tool.call", map[string]any{
+	payload := map[string]any{
 		"tool_call_id": event.ToolCallID,
 		"title":        state.title,
 		"tool_kind":    state.kind,
 		"status":       status,
 		"duration_ms":  time.Since(state.startedAt).Milliseconds(),
-	})
+	}
+	if detail := summarizeToolInput(state.input); detail != "" {
+		payload["detail"] = detail
+	}
+	if len(state.input) > 0 && len(state.input) <= maxToolInputBytes {
+		payload["input"] = string(state.input)
+	}
+	emitWork("tool.call", payload)
+}
+
+// maxToolInputBytes 限制随事件上报的工具入参大小（原始 JSON 会被脱敏后落库）。
+const maxToolInputBytes = 4 << 10
+
+// summarizeToolInput 从 ACP rawInput 里挑出人最想看的那个字段。
+//
+// Edit/Write 的 old_string/new_string、Write 的 content 往往几 KB，
+// 不进摘要，只给「路径」；完整入参放在 input 里供「原始数据」查看。
+func summarizeToolInput(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return clipText(protocol.Redact(string(raw)), 200)
+	}
+	pick := func(keys ...string) string {
+		for _, key := range keys {
+			value, ok := fields[key]
+			if !ok {
+				continue
+			}
+			switch typed := value.(type) {
+			case string:
+				if strings.TrimSpace(typed) != "" {
+					return typed
+				}
+			case []any:
+				parts := make([]string, 0, len(typed))
+				for _, item := range typed {
+					if text, ok := item.(string); ok {
+						parts = append(parts, text)
+					}
+				}
+				if len(parts) > 0 {
+					return strings.Join(parts, " ")
+				}
+			}
+		}
+		return ""
+	}
+	if command := pick("command", "cmd"); command != "" {
+		return clipText(protocol.Redact(strings.TrimSpace(command)), 300)
+	}
+	if path := pick("file_path", "path", "filePath", "notebook_path"); path != "" {
+		return clipText(path, 200)
+	}
+	if pattern := pick("pattern", "query", "url"); pattern != "" {
+		return clipText(protocol.Redact(pattern), 200)
+	}
+	compact, err := json.Marshal(fields)
+	if err != nil {
+		return ""
+	}
+	return clipText(protocol.Redact(string(compact)), 200)
+}
+
+// clipText 按字符截断。
+func clipText(text string, limit int) string {
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return string(runes[:limit]) + "…"
 }
 
 // uploadArtifacts 把本次执行期间新增/修改的文件上报给控制面。

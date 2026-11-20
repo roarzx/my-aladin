@@ -208,7 +208,19 @@ function eventDetail(event: StreamEvent): ReactNode {
       if (duration > 0) parts.push(formatDuration(duration))
       const status = text(payload.status)
       if (status) parts.push(status === 'failed' ? '失败' : status === 'completed' ? '成功' : status)
-      return parts.join(' · ')
+      const detail = text(payload.detail)
+      // Bash 的标题就是命令本身，别再重复一行。
+      const showDetail = detail !== '' && detail !== text(payload.title)
+      return (
+        <>
+          {showDetail ? (
+            <code className="audit-tool-detail" title={detail}>
+              {detail}
+            </code>
+          ) : null}
+          <span>{parts.join(' · ')}</span>
+        </>
+      )
     }
     case 'turn.failed': {
       const reason = text(payload.reason)
@@ -254,7 +266,7 @@ function eventDetail(event: StreamEvent): ReactNode {
               {statusLabel(from)} → {statusLabel(to)}
             </span>
           ) : null}
-          {reason ? <span className="audit-reason">{reason}</span> : null}
+          {reason ? <span className="audit-note">{reason}</span> : null}
         </>
       )
     }

@@ -176,6 +176,9 @@ func run(cfgPath string) error {
 		if err := mysqlstore.HeartbeatMachine(ctx, db, machineID); err != nil {
 			slog.Warn("机器上线状态写入失败", "machine", machineID, "err", err)
 		}
+		// 新连接意味着上一批进程已经没了：把该机器上没收尾的执行标记失败，
+		// 否则对应 Issue 会一直卡在「已有执行进行中」。
+		issueService.FailStaleRuns(ctx, machineID)
 	}
 	wsServer.OnDisconnect = func(ctx context.Context, machineID string) {
 		if err := mysqlstore.MarkMachineOffline(ctx, db, machineID); err != nil {
