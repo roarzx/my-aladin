@@ -23,6 +23,11 @@ export interface Task {
   status: TaskStatus
   version: number
   planBranch?: string
+  /** 列表卡片用的摘要字段（详情接口不返回）。 */
+  requirement?: string
+  agentName?: string
+  latestRunStatus?: IssueRun['status']
+  latestRunAt?: string
   createdAt: string
   updatedAt: string
   cancelRequestedAt?: string

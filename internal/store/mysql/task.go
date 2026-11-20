@@ -178,15 +178,37 @@ func nullString(s string) any {
 	return s
 }
 
+// TaskPreview 是驾驶舱列表的一行：任务本身 + 一眼要看的信息。
+type TaskPreview struct {
+	domain.Task
+	// AgentName 是任务的规划/执行 Agent 名称。
+	AgentName string
+	// LatestRunStatus / LatestRunAt 是最近一轮执行的结果与时间（可空）。
+	LatestRunStatus string
+	LatestRunAt     sql.NullTime
+}
+
 // ListTasksForUser 列出用户所在工作区的任务（驾驶舱首页）。
-func ListTasksForUser(ctx context.Context, ex Executor, userID uint64, limit int) ([]domain.Task, error) {
+//
+// 卡片要显示「谁在做、上一轮怎么样」，因此在一条 SQL 里带上 Agent 名称与
+// 最近一轮执行，避免前端逐条再查。
+func ListTasksForUser(ctx context.Context, ex Executor, userID uint64, limit int) ([]TaskPreview, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
 	rows, err := ex.QueryContext(ctx, `
-		SELECT t.id, t.workspace_id, t.created_by, t.name, t.mode, t.status, t.version,
-		       t.activity_seq, t.plan_branch, t.config_snapshot, t.cancel_requested_at,
-		       t.created_at, t.updated_at
+		SELECT t.id, t.workspace_id, t.created_by, t.name, t.requirement, t.mode, t.status,
+		       t.version, t.activity_seq, t.plan_branch, t.config_snapshot,
+		       t.cancel_requested_at, t.created_at, t.updated_at,
+		       COALESCE((SELECT a.name FROM task_agents ta
+		                   JOIN agents a ON a.id = ta.agent_id
+		                  WHERE ta.task_id = t.id
+		                  ORDER BY ta.role = 'planner' DESC, ta.agent_ref
+		                  LIMIT 1), '') AS agent_name,
+		       (SELECT r.status FROM issue_runs r
+		         WHERE r.task_id = t.id ORDER BY r.created_at DESC LIMIT 1) AS run_status,
+		       (SELECT r.updated_at FROM issue_runs r
+		         WHERE r.task_id = t.id ORDER BY r.created_at DESC LIMIT 1) AS run_at
 		FROM tasks t
 		JOIN workspace_members m ON m.workspace_id = t.workspace_id
 		WHERE m.user_id = ?
@@ -197,28 +219,33 @@ func ListTasksForUser(ctx context.Context, ex Executor, userID uint64, limit int
 	}
 	defer func() { _ = rows.Close() }()
 
-	var out []domain.Task
+	var out []TaskPreview
 	for rows.Next() {
 		var (
-			t          domain.Task
-			mode       string
-			status     string
-			planBranch sql.NullString
-			cancelAt   sql.NullTime
+			item        TaskPreview
+			mode        string
+			status      string
+			requirement sql.NullString
+			planBranch  sql.NullString
+			cancelAt    sql.NullTime
+			runStatus   sql.NullString
 		)
-		if err := rows.Scan(&t.ID, &t.WorkspaceID, &t.CreatedBy, &t.Name, &mode, &status,
-			&t.Version, &t.ActivitySeq, &planBranch, &t.ConfigSnapshot,
-			&cancelAt, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.CreatedBy, &item.Name,
+			&requirement, &mode, &status, &item.Version, &item.ActivitySeq, &planBranch,
+			&item.ConfigSnapshot, &cancelAt, &item.CreatedAt, &item.UpdatedAt,
+			&item.AgentName, &runStatus, &item.LatestRunAt); err != nil {
 			return nil, err
 		}
-		t.Mode = domain.TaskMode(mode)
-		t.Status = domain.TaskStatus(status)
-		t.PlanBranch = planBranch.String
+		item.Requirement = requirement.String
+		item.Mode = domain.TaskMode(mode)
+		item.Status = domain.TaskStatus(status)
+		item.PlanBranch = planBranch.String
+		item.LatestRunStatus = runStatus.String
 		if cancelAt.Valid {
 			v := cancelAt.Time
-			t.CancelRequestedAt = &v
+			item.CancelRequestedAt = &v
 		}
-		out = append(out, t)
+		out = append(out, item)
 	}
 	return out, rows.Err()
 }

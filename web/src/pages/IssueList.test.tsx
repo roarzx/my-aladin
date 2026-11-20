@@ -14,6 +14,10 @@ const tasks = [
     mode: 'ordinary',
     status: 'executing',
     version: 3,
+    agentName: 'Claude',
+    requirement: '把登录页改好',
+    latestRunStatus: 'completed',
+    latestRunAt: '2026-01-01T00:00:00Z',
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
   },
@@ -47,6 +51,7 @@ describe('IssueList', () => {
     const link = await screen.findByRole('link', { name: /演示任务/ })
     expect(link).toHaveAttribute('href', '/task/detail?id=task-1')
     expect(within(link).getByText('执行中')).toBeInTheDocument()
+    expect(within(link).getByText('Claude')).toBeInTheDocument()
   })
 
   it('看板四列在空列表时展示占位', async () => {
@@ -60,7 +65,10 @@ describe('IssueList', () => {
     expect(screen.getByRole('heading', { name: '执行中' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '异常处理' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '已完成' })).toBeInTheDocument()
-    expect(screen.getAllByText('暂无任务')).toHaveLength(4)
+    expect(screen.getByText('没有待开始的 Issue')).toBeInTheDocument()
+    expect(screen.getByText('当前没有执行中的 Issue')).toBeInTheDocument()
+    expect(screen.getByText('没有需要处理的异常')).toBeInTheDocument()
+    expect(screen.getByText('还没有完成的 Issue')).toBeInTheDocument()
   })
 
   it('接口失败显示错误信息', async () => {

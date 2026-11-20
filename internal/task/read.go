@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -23,26 +24,31 @@ type MemberLookup interface {
 }
 
 type taskView struct {
-	ID          string     `json:"id"`
-	WorkspaceID string     `json:"workspaceId"`
-	Name        string     `json:"name"`
-	Mode        string     `json:"mode"`
-	Status      string     `json:"status"`
-	Version     uint64     `json:"version"`
-	PlanBranch  string     `json:"planBranch,omitempty"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	UpdatedAt   time.Time  `json:"updatedAt"`
-	CancelAt    *time.Time `json:"cancelRequestedAt,omitempty"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspaceId"`
+	Name        string `json:"name"`
+	Mode        string `json:"mode"`
+	Status      string `json:"status"`
+	Version     uint64 `json:"version"`
+	PlanBranch  string `json:"planBranch,omitempty"`
+	// 以下字段只在列表里返回，供卡片一眼看出「谁在做、上轮怎么样」。
+	Requirement     string     `json:"requirement,omitempty"`
+	AgentName       string     `json:"agentName,omitempty"`
+	LatestRunStatus string     `json:"latestRunStatus,omitempty"`
+	LatestRunAt     *time.Time `json:"latestRunAt,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
+	CancelAt        *time.Time `json:"cancelRequestedAt,omitempty"`
 }
 
 // runSummary 是最近一轮执行的摘要，供驾驶舱显示「上轮何时结束」。
 type runSummary struct {
-	ID        string     `json:"id"`
-	Status    string     `json:"status"`
-	AgentID   string     `json:"agentId"`
-	Reply     string     `json:"reply,omitempty"`
-	CreatedAt time.Time  `json:"createdAt"`
-	UpdatedAt time.Time  `json:"updatedAt"`
+	ID        string    `json:"id"`
+	Status    string    `json:"status"`
+	AgentID   string    `json:"agentId"`
+	Reply     string    `json:"reply,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type agentSummary struct {
@@ -156,12 +162,29 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]taskView, 0, len(tasks))
 	for _, task := range tasks {
-		out = append(out, taskView{
+		view := taskView{
 			ID: task.ID, WorkspaceID: task.WorkspaceID, Name: task.Name,
 			Mode: string(task.Mode), Status: string(task.Status), Version: task.Version,
-			PlanBranch: task.PlanBranch, CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
+			PlanBranch: task.PlanBranch, AgentName: task.AgentName,
+			LatestRunStatus: task.LatestRunStatus,
+			Requirement:     truncateText(task.Requirement, 160),
+			CreatedAt:       task.CreatedAt, UpdatedAt: task.UpdatedAt,
 			CancelAt: task.CancelRequestedAt,
-		})
+		}
+		if task.LatestRunAt.Valid {
+			at := task.LatestRunAt.Time
+			view.LatestRunAt = &at
+		}
+		out = append(out, view)
 	}
 	httpapi.JSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+// truncateText 按字符截断，用于列表卡片的需求摘要。
+func truncateText(text string, limit int) string {
+	runes := []rune(strings.TrimSpace(text))
+	if len(runes) <= limit {
+		return string(runes)
+	}
+	return string(runes[:limit]) + "…"
 }
