@@ -92,7 +92,7 @@ function failureSummary(errorClass: string): string {
 
 /** 会话里的条目：用户消息、Agent 回复、状态变更、失败与提问。 */
 type ThreadItem =
-  | { key: string; kind: 'user' | 'assistant'; text: string; at: string }
+  | { key: string; kind: 'user' | 'assistant'; text: string; narration?: string; at: string }
   | { key: string; kind: 'status'; from: string; to: string; reason: string; at: string }
   | { key: string; kind: 'failed'; reason: string; errorClass: string; at: string }
   | { key: string; kind: 'input'; message: string; at: string }
@@ -150,6 +150,8 @@ function fileBadge(path: string): string {
 function buildThread(events: { seq: number; eventId: string; kind: string; payload: unknown; createdAt: string }[]): ThreadItem[] {
   const sorted = [...events].sort((a, b) => a.seq - b.seq)
   const items: ThreadItem[] = []
+  // Agent 的过程叙述紧挨在回复之前落库，先收着，拼进同一个气泡。
+  let pendingNarration: { runId: string; text: string } | null = null
   for (const event of sorted) {
     const payload = payloadOf(event)
     const key = event.eventId || `${event.kind}-${event.seq}`
@@ -157,9 +159,25 @@ function buildThread(events: { seq: number; eventId: string; kind: string; paylo
       case 'message.user':
         items.push({ key, kind: 'user', text: str(payload.text), at: event.createdAt })
         break
-      case 'message.assistant':
-        items.push({ key, kind: 'assistant', text: str(payload.text), at: event.createdAt })
+      case 'agent.narration':
+        pendingNarration = { runId: str(payload.run_id), text: str(payload.text) }
         break
+      case 'message.assistant': {
+        const runId = str(payload.run_id)
+        const narration =
+          pendingNarration && (!pendingNarration.runId || !runId || pendingNarration.runId === runId)
+            ? pendingNarration.text
+            : ''
+        pendingNarration = null
+        items.push({
+          key,
+          kind: 'assistant',
+          text: str(payload.text),
+          narration: narration || undefined,
+          at: event.createdAt,
+        })
+        break
+      }
       case 'issue.status':
         items.push({
           key,
@@ -189,6 +207,19 @@ function buildThread(events: { seq: number; eventId: string; kind: string; paylo
   return items
 }
 
+/** 一次执行里 Agent 的中间叙述：折叠展示，不挤占结论。 */
+function Narration({ text }: { text: string }): ReactNode {
+  const paragraphs = text.split(/\n{2,}/).filter((part) => part.trim() !== '').length
+  return (
+    <details className="chat-narration" data-testid="thread-narration">
+      <summary>执行过程（{paragraphs} 段）</summary>
+      <div className="chat-narration-body">
+        <MarkdownView text={text} />
+      </div>
+    </details>
+  )
+}
+
 function ThreadBubble({
   item,
   agentName,
@@ -214,7 +245,14 @@ function ThreadBubble({
             <span className="msg-time">{formatTime(item.at)}</span>
           </div>
           <div className="chat-body">
-            {isUser ? item.text : <MarkdownView text={item.text} />}
+            {isUser ? (
+              item.text
+            ) : (
+              <>
+                {item.narration ? <Narration text={item.narration} /> : null}
+                <MarkdownView text={item.text} />
+              </>
+            )}
           </div>
         </div>
       </article>

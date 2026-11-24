@@ -246,6 +246,12 @@ func (s *Service) ApplyTurnDone(ctx context.Context, executionID string, data ma
 			s.log().Warn("保存 ACP 会话失败", "session", run.SessionID, "err", err)
 		}
 	}
+	// 过程说明先落库：会话页把它折叠在回复气泡上方。
+	if narration := stringField(data, "narration"); narration != "" {
+		_, _ = mysqlstore.AppendActivity(ctx, s.DB, run.TaskID, "agent.narration", map[string]any{
+			"text": narration, "run_id": run.ID,
+		})
+	}
 	if reply != "" {
 		_, _ = mysqlstore.AppendActivity(ctx, s.DB, run.TaskID, "message.assistant", map[string]any{
 			"text": reply, "run_id": run.ID,

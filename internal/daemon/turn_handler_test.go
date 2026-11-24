@@ -489,3 +489,87 @@ func TestSummarizeToolInput(t *testing.T) {
 		t.Fatalf("超长命令未截断: %d", len([]rune(long)))
 	}
 }
+
+func TestTurnOutputSplitsNarrationFromReply(t *testing.T) {
+	summary := strings.Repeat("改完了，", 40) + "测试通过。"
+	cases := []struct {
+		name      string
+		blocks    []string
+		reply     string
+		narration string
+	}{
+		{
+			name:   "只有一段：整段就是回复",
+			blocks: []string{"改好了，测试通过。"},
+			reply:  "改好了，测试通过。",
+		},
+		{
+			name:      "过程叙述与结论分开",
+			blocks:    []string{"Let me look at the failing test first.", summary},
+			reply:     summary,
+			narration: "Let me look at the failing test first.",
+		},
+		{
+			name:      "总结之后的 CLI 上报不算回复",
+			blocks:    []string{"Let me read the file.", summary, "已上报 completed。"},
+			reply:     summary + "\n\n已上报 completed。",
+			narration: "Let me read the file.",
+		},
+		{
+			name:      "全是短句：最后一段当回复",
+			blocks:    []string{"先看看。", "好了。"},
+			reply:     "好了。",
+			narration: "先看看。",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			output := &turnOutput{}
+			for _, block := range tc.blocks {
+				output.add(block)
+				output.breakBlock() // 模拟每段文字后面都有一次工具调用
+			}
+			reply, narration := output.split()
+			if reply != tc.reply {
+				t.Fatalf("reply = %q，期望 %q", reply, tc.reply)
+			}
+			if narration != tc.narration {
+				t.Fatalf("narration = %q，期望 %q", narration, tc.narration)
+			}
+		})
+	}
+}
+
+func TestTurnOutputIgnoresBlankBlocks(t *testing.T) {
+	output := &turnOutput{}
+	output.add("   ")
+	output.breakBlock()
+	output.add("ok")
+	reply, narration := output.split()
+	if reply != "ok" || narration != "" {
+		t.Fatalf("reply = %q, narration = %q", reply, narration)
+	}
+}
+
+// 一轮里「叙述 → 工具 → 结论」时，turn_done 要把结论和过程分开回传。
+func TestTurnHandlerSeparatesNarrationFromReply(t *testing.T) {
+	h := newTestTurnHandler(t, "chatty")
+	sender := newRecordingSender()
+	params := turnParams{ExecutionID: "exec-9", IssueID: "task-9", Prompt: "hi"}
+
+	if _, err := h.Handle(WithSender(context.Background(), sender), startEnvelope(t, params)); err != nil {
+		t.Fatal(err)
+	}
+	sender.wait(t)
+
+	last := sender.lastEvent()
+	if last.kind != "turn_done" {
+		t.Fatalf("终态事件 = %+v", last)
+	}
+	if got := last.data["reply"]; got != "修好了，测试通过。" {
+		t.Fatalf("reply = %q，期望只包含结论", got)
+	}
+	if got := last.data["narration"]; got != "Let me look at the file first." {
+		t.Fatalf("narration = %q", got)
+	}
+}

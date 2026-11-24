@@ -105,6 +105,35 @@ func main() {
 				continue // 不回复，等待取消或被杀
 			case "crash":
 				os.Exit(1)
+			case "chatty":
+				// 模拟真实 Agent：讲一句 → 调工具 → 再讲一句。
+				update := func(value map[string]any) {
+					write(map[string]any{
+						"jsonrpc": "2.0", "method": "session/update",
+						"params": map[string]any{
+							"sessionId": sessionID,
+							"update":    value,
+						},
+					})
+				}
+				update(map[string]any{
+					"sessionUpdate": "agent_message_chunk",
+					"content":       map[string]any{"type": "text", "text": "Let me look at the file first."},
+				})
+				update(map[string]any{
+					"sessionUpdate": "tool_call",
+					"toolCallId":    "t1", "title": "read", "kind": "read", "status": "pending",
+				})
+				update(map[string]any{
+					"sessionUpdate": "tool_call_update",
+					"toolCallId":    "t1", "status": "completed",
+				})
+				update(map[string]any{
+					"sessionUpdate": "agent_message_chunk",
+					"content":       map[string]any{"type": "text", "text": "修好了，测试通过。"},
+				})
+				result(msg.ID, map[string]any{"stopReason": "end_turn"})
+				continue
 			}
 			write(map[string]any{
 				"jsonrpc": "2.0", "method": "session/update",

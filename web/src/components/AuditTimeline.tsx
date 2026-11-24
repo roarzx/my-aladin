@@ -20,6 +20,7 @@ const EVENT_LABELS: Record<string, string> = {
   'issue.input_requested': 'Agent 请求输入',
   'tool.call': '工具调用',
   'agent.notice': 'Agent 通知',
+  'agent.narration': '执行过程',
   'message.user': '用户消息',
   'message.assistant': 'Agent 回复',
   'task.cancel_requested': '请求取消',
@@ -62,6 +63,11 @@ function text(value: unknown): string {
 
 function num(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function clipText(value: string, limit: number): string {
+  const runes = Array.from(value)
+  return runes.length <= limit ? value : `${runes.slice(0, limit).join('')}…`
 }
 
 function formatTime(value: string): string {
@@ -274,6 +280,8 @@ function eventDetail(event: StreamEvent): ReactNode {
       return text(payload.mode) ? `模式 ${text(payload.mode)}` : ''
     case 'agent.notice':
       return text(payload.text)
+    case 'agent.narration':
+      return <span className="audit-note">{clipText(text(payload.text), 140)}</span>
     default:
       return ''
   }

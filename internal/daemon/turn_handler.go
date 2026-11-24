@@ -164,12 +164,16 @@ func (h *TurnHandler) run(ctx context.Context, params turnParams, sender Sender)
 	}
 
 	// 汇总本轮助手输出，随 turn_done 回传，用于会话页展示「回复」。
-	var reply strings.Builder
+	output := &turnOutput{}
 	result, err := session.Prompt(ctx, h.promptWithSystem(params), func(event agentevent.Event) {
 		switch event.Kind {
 		case agentevent.KindToolCall, agentevent.KindToolUpdate:
 			h.log().Debug("ACP 工具事件", "kind", event.Kind, "tool", event.ToolCallID,
 				"status", event.Status, "title", event.Title)
+			if event.ToolCallID != "" && tools[event.ToolCallID] == nil {
+				// 新的工具调用意味着「上一句说完了」，后面的文字另起一段。
+				output.breakBlock()
+			}
 			handleTool(tools, emitWork, event)
 			return
 		case agentevent.KindNotice:
@@ -182,9 +186,7 @@ func (h *TurnHandler) run(ctx context.Context, params turnParams, sender Sender)
 		}
 		if event.Kind == agentevent.KindStreamDelta {
 			_, _ = digest.Write([]byte(event.Text))
-			if reply.Len() < maxReplyBytes {
-				reply.WriteString(event.Text)
-			}
+			output.add(event.Text)
 		}
 		if err := sender.SendStream(params.ExecutionID, seq.Add(1), event.Text, false); err != nil {
 			h.log().Warn("发送流式内容失败", "err", err)
@@ -200,6 +202,7 @@ func (h *TurnHandler) run(ctx context.Context, params turnParams, sender Sender)
 	}
 
 	summaryDigest := hex.EncodeToString(digest.Sum(nil))
+	reply, narration := output.split()
 
 	switch result.StopReason {
 	case "end_turn":
@@ -223,7 +226,8 @@ func (h *TurnHandler) run(ctx context.Context, params turnParams, sender Sender)
 			"input_tokens":   result.Usage.InputTokens,
 			"output_tokens":  result.Usage.OutputTokens,
 			"duration_ms":    time.Since(runStarted).Milliseconds(),
-			"reply":          reply.String(),
+			"reply":          reply,
+			"narration":      narration,
 			"acp_session_id": session.ACPID(),
 		}); err != nil {
 			h.log().Warn("发送 turn_done 失败", "err", err)
@@ -258,8 +262,63 @@ type toolState struct {
 	input     json.RawMessage
 }
 
-// maxReplyBytes 限制随 turn_done 回传的助手文本长度（会话展示用）。
-const maxReplyBytes = 8000
+// turnOutput 按「文字块」累积一轮的助手输出。
+//
+// ACP 会把「说一句 → 调一次工具 → 再说一句」拆成多段连续文本帧。直接
+// 拼起来会变成 “Let me build it.Now let me verify…” 这种黏连长文，会话页
+// 也就分不清哪句是结论、哪句是过程。这里以工具调用为分段边界：最后一段
+// 当作回复展示，前面几段折叠成「执行过程」。
+type turnOutput struct {
+	blocks []string
+	cur    strings.Builder
+}
+
+const (
+	// maxBlockBytes 是单段文字的上限（会话展示用）。
+	maxBlockBytes = 8 << 10
+	// maxNarrationBytes 是整轮过程说明的上限，避免超长执行撑爆活动记录。
+	maxNarrationBytes = 16 << 10
+	// finalBlockMinRunes 判定「这是一段完整的结论」的最小长度。
+	finalBlockMinRunes = 120
+)
+
+func (o *turnOutput) add(text string) {
+	if text == "" || o.cur.Len() >= maxBlockBytes {
+		return
+	}
+	o.cur.WriteString(text)
+}
+
+// breakBlock 结束当前文字块（遇到工具调用或本轮结束时）。
+func (o *turnOutput) breakBlock() {
+	text := strings.TrimSpace(o.cur.String())
+	o.cur.Reset()
+	if text != "" {
+		o.blocks = append(o.blocks, text)
+	}
+}
+
+// split 返回最终回复与过程说明。
+//
+// 回复取「最后一段足够完整的文字」，而不是简单取最后一段：Agent 常在总结
+// 之后再用 CLI 上报状态，最后一段可能只有「已上报」几个字，不能让它把总结
+// 挤进折叠区。整轮都只有短句时，仍然取最后一段。
+func (o *turnOutput) split() (reply, narration string) {
+	o.breakBlock()
+	if len(o.blocks) == 0 {
+		return "", ""
+	}
+	index := len(o.blocks) - 1
+	for i := len(o.blocks) - 1; i >= 0; i-- {
+		if len([]rune(o.blocks[i])) >= finalBlockMinRunes {
+			index = i
+			break
+		}
+	}
+	reply = strings.Join(o.blocks[index:], "\n\n")
+	narration = strings.Join(o.blocks[:index], "\n\n")
+	return clipText(reply, maxBlockBytes), clipText(narration, maxNarrationBytes)
+}
 
 func handleTool(tools map[string]*toolState, emitWork func(string, map[string]any), event agentevent.Event) {
 	if event.ToolCallID == "" {

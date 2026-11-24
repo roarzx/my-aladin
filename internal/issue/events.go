@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"strings"
 
 	mysqlstore "github.com/roarzx/my-aladin/internal/store/mysql"
 	"github.com/roarzx/my-aladin/pkg/protocol"
@@ -72,15 +71,6 @@ func (h *EventHandler) workEvent(ctx context.Context, executionID string, data m
 	payload["run_id"] = run.ID
 	_, _ = mysqlstore.AppendActivity(ctx, h.Service.DB, run.TaskID, kind, payload)
 	return nil
-}
-
-// truncateRunes 按字符截断，避免超长文本进入活动流。
-func truncateRunes(text string, limit int) string {
-	runes := []rune(strings.TrimSpace(text))
-	if len(runes) <= limit {
-		return string(runes)
-	}
-	return string(runes[:limit]) + "…"
 }
 
 func (h *EventHandler) logger() *slog.Logger {
