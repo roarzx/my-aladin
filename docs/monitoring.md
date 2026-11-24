@@ -35,7 +35,8 @@
 | `aladdin_issues{status}` | 当前各状态 Issue 数 | 全量，不分窗口 |
 | 每日创建 / 完成 | `tasks.created_at` / `issue.status.to=completed` 事件 | 完成按事件算，一个 Issue 可以完成后再打开 |
 | `aladdin_runs_total{status}` | 窗口内轮次数 | — |
-| `aladdin_run_success_ratio` | `completed / (completed+failed+cancelled)` | 只算终态，运行中单独展示 |
+| Issue 完成率 | 当前 `tasks.status=completed` / 全部 Issue | **Agent 上报完成**，与上面的轮次口径不同 |
+| `aladdin_run_success_ratio` | `completed / (completed+failed+cancelled)` | **轮次正常结束率**：只算终态；`completed` 指这一轮正常收尾（turn_done），不是 Agent 上报完成 |
 | `aladdin_run_error_ratio` | `failed / 终态轮次` | 与完成率的分母一致 |
 | `aladdin_runs_retried_total` | 同一 Issue 第 2 轮及以后的执行数 | **含用户追加消息**，不是纯重试 |
 | `aladdin_run_duration_seconds{status}` | 单轮耗时直方图 | 仅终态轮次；`updated_at - created_at` |
@@ -53,7 +54,8 @@
 - **不做高基数指标**：`task_id` / `run_id` / `execution_id` 只出现在页面与事件里，不进标签。
 - **不上报内容**：prompt、文件内容、工具入参与输出不进监控；`/metrics` 只有聚合数字。
 - **不把「上报完成」当业务成功**：Agent 自己上报 completed 只代表它认为做完了，
-  真正的质量由 evals 判定。看板文案写作「上报完成率」。
+  真正的质量由 evals 判定。看板同时展示「轮次正常结束率」（执行健康）和
+  「Agent 上报完成」（业务状态），两者不要混用。
 - **不做成本估算（P0）**：只记录 token，单价表留到需要时再加。
 - **不伪造上下文压缩数据**：ACP 事件里没有压缩行为，页面明确标注「尚未采集」。
 

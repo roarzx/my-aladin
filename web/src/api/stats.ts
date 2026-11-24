@@ -56,6 +56,7 @@ export interface StatsOverview {
   issues: {
     total: number
     byStatus: Record<string, number>
+    completionRate: number
     created: DayCount[]
     completed: DayCount[]
   }

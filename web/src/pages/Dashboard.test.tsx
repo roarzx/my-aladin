@@ -30,6 +30,7 @@ function makeStats(): StatsOverview {
     issues: {
       total: 3,
       byStatus: { executing: 1, completed: 2 },
+      completionRate: 2 / 3,
       created: days.map((date, index) => ({ date, count: index })),
       completed: days.map((date, index) => ({ date, count: index === 2 ? 2 : 0 })),
     },
@@ -105,12 +106,16 @@ describe('Dashboard', () => {
       </RouterProvider>,
     )
 
-    expect(await screen.findByText('上报完成率')).toBeInTheDocument()
+    expect(await screen.findByText('轮次正常结束率')).toBeInTheDocument()
     expect(screen.getByText('75%')).toBeInTheDocument()
     expect(screen.getByText('2m18s')).toBeInTheDocument()
     expect(screen.getByText('近 7 天 Token')).toBeInTheDocument()
     expect(screen.getByText('29k')).toBeInTheDocument()
-    expect(screen.getByText('3/4 轮；只算终态')).toBeInTheDocument()
+    expect(screen.getByText('3/4 轮正常收尾；不代表业务完成')).toBeInTheDocument()
+    // Agent 自己上报完成的 Issue 占比。
+    expect(screen.getByText('Agent 上报完成')).toBeInTheDocument()
+    expect(screen.getByText('66.7%')).toBeInTheDocument()
+    expect(screen.getByText('2/3 个 Issue 被标记完成')).toBeInTheDocument()
     // 失败率与 Worker 可用性（33.3%）。
     expect(screen.getByText('25%')).toBeInTheDocument()
     expect(screen.getAllByText('33.3%').length).toBeGreaterThan(0)

@@ -247,9 +247,9 @@ export default function Dashboard() {
               to="/task/list"
             />
             <MetricCard
-              label="上报完成率"
+              label="轮次正常结束率"
               value={percent(stats.runs.successRate)}
-              foot={`${stats.runs.succeeded}/${stats.runs.finished} 轮；只算终态`}
+              foot={`${stats.runs.succeeded}/${stats.runs.finished} 轮正常收尾；不代表业务完成`}
             />
             <MetricCard
               label="失败率"
@@ -282,9 +282,9 @@ export default function Dashboard() {
               foot={`其中 ${stats.runs.retried} 轮非首轮`}
             />
             <MetricCard
-              label="已完成"
-              value={stats.issues.byStatus.completed ?? 0}
-              foot="Agent 上报完成"
+              label="Agent 上报完成"
+              value={percent(stats.issues.completionRate)}
+              foot={`${stats.issues.byStatus.completed ?? 0}/${stats.issues.total} 个 Issue 被标记完成`}
               to="/task/list"
             />
           </div>

@@ -52,10 +52,12 @@ type Overview struct {
 
 // IssueStats 是 Issue 层面的现状与每日趋势。
 type IssueStats struct {
-	Total     int            `json:"total"`
-	ByStatus  map[string]int `json:"byStatus"`
-	Created   []DayCount     `json:"created"`
-	Completed []DayCount     `json:"completed"`
+	Total    int            `json:"total"`
+	ByStatus map[string]int `json:"byStatus"`
+	// CompletionRate 是当前处于 completed 的 Issue 占比（Agent 自己上报的完成）。
+	CompletionRate float64    `json:"completionRate"`
+	Created        []DayCount `json:"created"`
+	Completed      []DayCount `json:"completed"`
 }
 
 // RunStats 是执行轮次的成功率与耗时分布。
@@ -188,6 +190,10 @@ func (s *Service) load(ctx context.Context, days int) (Overview, error) {
 	var err error
 	if overview.Issues.ByStatus, overview.Issues.Total, err = s.issueStatus(ctx); err != nil {
 		return Overview{}, err
+	}
+	if overview.Issues.Total > 0 {
+		overview.Issues.CompletionRate =
+			float64(overview.Issues.ByStatus["completed"]) / float64(overview.Issues.Total)
 	}
 	if overview.Issues.Created, err = s.dayCounts(ctx,
 		`SELECT DATE_FORMAT(created_at, '%Y-%m-%d'), COUNT(*)

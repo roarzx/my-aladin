@@ -57,7 +57,7 @@ function AgentTable({ overview }: { overview: StatsOverview }) {
         <span>Agent</span>
         <span>运行时 / 模型</span>
         <span>轮次</span>
-        <span>成功率</span>
+        <span>正常结束率</span>
         <span>P50 / P95</span>
         <span>工具</span>
         <span>Token（入 / 出）</span>
@@ -166,7 +166,8 @@ export default function ExecutionAnalysis() {
                 <h2>Agent 维度</h2>
                 <p>
                   {stats.agents.length} 个 Agent · {stats.runs.total} 轮执行 ·{' '}
-                  {stats.runs.retried} 轮为非首轮（含用户追加消息）
+                  {stats.runs.retried} 轮为非首轮（含用户追加消息）。正常结束率 = 轮次正常收尾，
+                  不代表 Agent 认为任务完成——那是 Issue 的上报状态。
                 </p>
               </div>
               <Link className="button subtle" to="/agents">
