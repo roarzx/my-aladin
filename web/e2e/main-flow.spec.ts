@@ -16,7 +16,7 @@ test.afterAll(async () => {
   })
 })
 
-test('主路径：创建 Agent/Issue → 计划启动 → fake 执行 → 本地 PR 链接', async ({ page, request }) => {
+test('主路径：创建 Agent/Issue → 自动执行 → fake 改动 → 本地 PR 链接', async ({ page, request }) => {
   const env = state()
   const stamp = Date.now()
   const machine = await api<any>(request, 'POST', '/machines', {
@@ -73,22 +73,20 @@ test('主路径：创建 Agent/Issue → 计划启动 → fake 执行 → 本地
   await expect(page).toHaveURL(/\/task\/detail\?id=/)
   await expect(page.getByRole('heading', { name: taskName })).toBeVisible()
 
-  await page.getByRole('button', { name: '提交计划' }).click()
-  await page.getByLabel('第 1 步标题').fill('修改 README')
-  await page.getByLabel('第 1 步说明').fill('在 README.md 末尾追加一行：Playwright E2E。只修改 README.md。')
-  await page.getByRole('button', { name: '提交计划' }).click()
-  await page.getByRole('button', { name: '确认并启动' }).click()
-
-  await expect(page.getByText('对话中', { exact: false }).first()).toBeVisible({ timeout: 60_000 })
-  await expect(page.getByText('step.done')).toBeVisible()
+  // 创建即执行：不需要提交计划，daemon 自己跑完这一轮。
   const prLink = page.getByRole('link', { name: '查看 PR' })
-  await expect(prLink).toBeVisible()
+  await expect(prLink).toBeVisible({ timeout: 120_000 })
   await expect(prLink).toHaveAttribute('href', /^local:\/\/pull\//)
 
   const taskId = new URL(page.url()).searchParams.get('id')!
   const detail = await api<any>(request, 'GET', `/issues/${taskId}`)
-  expect(detail.task.status).toBe('chatting')
+  // 平台不替 Agent 认定完成：fake agent 不上报时，任务保持执行中。
+  expect(detail.task.status).toBe('executing')
+  expect(detail.task.planBranch).toMatch(/^aladdin\//)
+
   const events = await api<any>(request, 'GET', `/issues/${taskId}/events?after=0`)
-  const done = events.find((event: any) => event.kind === 'step.done')
+  const done = events.find((event: any) => event.kind === 'turn.done')
   expect(done?.payload?.commit_sha).toBeTruthy()
+  expect(done?.payload?.pr_url).toMatch(/^local:\/\/pull\//)
+  expect(done?.payload?.branch).toBe(detail.task.planBranch)
 })

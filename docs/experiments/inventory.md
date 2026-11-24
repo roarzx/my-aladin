@@ -308,7 +308,7 @@ default:        ... turn_fail(error_class=verification)
 
 | # | 缺陷 | 证据 | 严重度 | 备注 |
 |---|---|---|---|---|
-| D-1 | 主路径 push/PR 断链 | `plan_branch`/`target_branch` 无写入方；`turn_handler.go:477` | 高（对外宣称的能力失效） | 与 commit `f0d9c44` 同源 |
+| D-1 | 主路径 push/PR 断链 | `plan_branch`/`target_branch` 无写入方；`turn_handler.go:477` | 高（对外宣称的能力失效） | **已修复**：首轮开始时分配 `aladdin/<id8>`（`store/mysql/task.go:AssignPlanBranch`），Playwright 主路径已复验 |
 | D-2 | 小队模式空转 | `InsertWorkItem` 无生产调用方；`Dispatcher=nil` | 中 | 功能未完成，与实验无关 |
 | D-3 | 规划会话不可用 | daemon 未实现 `start_planning_session` | 中 | 已被 Issue 长会话取代，可考虑删代码 |
 | D-4 | 用量缺失记为 0 | `issue_runs.input_tokens DEFAULT 0` | 中 | 直接影响 EX-3 与看板可信度 |

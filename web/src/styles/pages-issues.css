@@ -1619,6 +1619,14 @@
   color:var(--faint);
 }
 
+/* 交付行里的 PR 链接：与会话文字同色，可点。 */
+.thread-link {
+  flex: none;
+  color: var(--accent, #3b82f6);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* 本轮失败：值得停下来的卡片，带下一步动作。 */
 .thread-failure {
   display: grid;

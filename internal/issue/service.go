@@ -101,6 +101,15 @@ func (s *Service) StartTurn(ctx context.Context, taskID, prompt string) (domain.
 	if len(repos) > 0 {
 		repo = repos[0]
 	}
+	// 统一计划分支：一个 Issue 的所有轮次落在同一分支上，交付时才能 push 并复用同一个 PR。
+	// 没有仓库时不需要分支（Agent 直接在工作目录里干活）。
+	if repo.RepositoryID != "" && task.PlanBranch == "" {
+		branch := "aladdin/" + shortID(task.ID)
+		if err := mysqlstore.AssignPlanBranch(ctx, s.DB, task.ID, branch); err != nil {
+			return domain.IssueRun{}, errcode.New(errcode.UpstreamUnavailable, "分配计划分支失败")
+		}
+		task.PlanBranch = branch
+	}
 
 	now := time.Now().UTC()
 	run := domain.IssueRun{
@@ -292,6 +301,7 @@ func (s *Service) ApplyTurnDone(ctx context.Context, executionID string, data ma
 		"input_tokens":  intField(data, "input_tokens"),
 		"output_tokens": intField(data, "output_tokens"),
 		"commit_sha":    stringField(data, "commit_sha"),
+		"branch":        stringField(data, "branch"),
 		"pr_url":        stringField(data, "pr_url"),
 	})
 	return nil
@@ -419,6 +429,14 @@ func stringField(data map[string]any, key string) string {
 		return v
 	}
 	return ""
+}
+
+// shortID 取标识的前 8 位，用于分支名与工作目录。
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
 }
 
 func intField(data map[string]any, key string) int {

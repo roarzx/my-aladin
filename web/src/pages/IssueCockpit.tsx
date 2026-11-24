@@ -97,6 +97,7 @@ type ThreadItem =
   | { key: string; kind: 'status'; from: string; to: string; reason: string; at: string }
   | { key: string; kind: 'failed'; reason: string; errorClass: string; at: string }
   | { key: string; kind: 'input'; message: string; at: string }
+  | { key: string; kind: 'delivery'; prUrl: string; branch: string; commitSha: string; at: string }
 
 const STATUS_NAMES: Record<string, string> = {
   pending: '待开始',
@@ -184,6 +185,22 @@ function buildThread(events: { seq: number; eventId: string; kind: string; paylo
       case 'issue.input_requested':
         items.push({ key, kind: 'input', message: str(payload.message), at: event.createdAt })
         break
+      case 'turn.done': {
+        // 有交付才有气泡：无改动的一轮没有 commit/pr，不打扰会话。
+        const prUrl = str(payload.pr_url)
+        const commitSha = str(payload.commit_sha)
+        if (prUrl || commitSha) {
+          items.push({
+            key,
+            kind: 'delivery',
+            prUrl,
+            branch: str(payload.branch),
+            commitSha,
+            at: event.createdAt,
+          })
+        }
+        break
+      }
       default:
         break
     }
@@ -317,6 +334,24 @@ function ThreadBubble({
           状态：{statusName(item.from)} → {statusName(item.to)}
           {item.reason ? `（${clip(item.reason, 60)}）` : ''}
         </span>
+        <span className="msg-time">{formatTime(item.at)}</span>
+      </div>
+    )
+  }
+  if (item.kind === 'delivery') {
+    return (
+      <div className="thread-system" data-testid="thread-delivery">
+        <StateDot tone="done" />
+        <span className="thread-system-text">
+          已交付
+          {item.branch ? ` · 分支 ${item.branch}` : ''}
+          {item.commitSha ? ` · ${item.commitSha.slice(0, 8)}` : ''}
+        </span>
+        {item.prUrl ? (
+          <a className="thread-link" href={item.prUrl} target="_blank" rel="noreferrer">
+            查看 PR
+          </a>
+        ) : null}
         <span className="msg-time">{formatTime(item.at)}</span>
       </div>
     )

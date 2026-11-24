@@ -171,6 +171,20 @@ func UpdateTaskRepositoryTargetBranch(ctx context.Context, ex Executor, taskID, 
 	return nil
 }
 
+// AssignPlanBranch 为任务分配统一计划分支：tasks.plan_branch 与全部仓库的 target_branch。
+//
+// 只在任务还没有分支时写入，重复开始同一 Issue 是幂等的；一个 Issue 的所有轮次
+// 共用同一分支，交付时才能 push 并在分支上复用同一个 PR。
+func AssignPlanBranch(ctx context.Context, ex Executor, taskID, branch string) error {
+	if _, err := ex.ExecContext(ctx,
+		`UPDATE tasks SET plan_branch = ?
+		  WHERE id = ? AND (plan_branch IS NULL OR plan_branch = '')`,
+		branch, taskID); err != nil {
+		return fmt.Errorf("分配任务计划分支: %w", err)
+	}
+	return UpdateTaskRepositoryTargetBranch(ctx, ex, taskID, branch)
+}
+
 func nullString(s string) any {
 	if s == "" {
 		return nil
