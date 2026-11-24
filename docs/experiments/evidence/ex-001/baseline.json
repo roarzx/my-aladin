@@ -1,0 +1,67 @@
+{
+  "experiment": "EX-001",
+  "phase": "baseline",
+  "aladdin_commit": "b121c4eb585cfd2948c530afe4f6f9877137f10a",
+  "dataset": "tests/e2e/recovery_test.go (R1-R5)",
+  "agent_config_hash": "n/a (stub runtime, no model)",
+  "started_at": "2026-11-24T17:05:51Z",
+  "command": "go test -tags=e2e ./tests/e2e/... -run TestRecovery -count=1 -v",
+  "log": "docs/experiments/evidence/ex-001/baseline.log",
+  "results": [
+    {
+      "case_id": "R1",
+      "name": "stale run cleanup",
+      "passed": true,
+      "observations": "FailStaleRuns 将 run 置 failed(error_class=runtime)，活动写 turn.failed，清理后可开新一轮"
+    },
+    {
+      "case_id": "R2",
+      "name": "late turn_done after fail",
+      "passed": false,
+      "violations": {
+        "message_assistant_delta": 1,
+        "turn_done_delta": 1,
+        "input_tokens": 100,
+        "output_tokens": 50
+      },
+      "expected": "0 / 0 / 0 / 0",
+      "note": "run 状态保持 failed（围栏生效），但回执副作用全部落库"
+    },
+    {
+      "case_id": "R3",
+      "name": "duplicate turn_done",
+      "passed": false,
+      "violations": {
+        "message_assistant_total": 2,
+        "turn_done_total": 2,
+        "input_tokens": 100,
+        "output_tokens": 50
+      },
+      "expected": "1 / 1 / 10 / 5",
+      "note": "重复回执覆盖用量（10/50 -> 100/50），活动重复"
+    },
+    {
+      "case_id": "R4",
+      "name": "late turn_fail after completed",
+      "passed": false,
+      "violations": { "turn_failed_delta": 1 },
+      "expected": "0",
+      "note": "run 状态保持 completed，但活动流出现矛盾的失败记录"
+    },
+    {
+      "case_id": "R5",
+      "name": "stale across turns",
+      "passed": false,
+      "violations": { "turn_done_delta": 1 },
+      "expected": "0",
+      "note": "第二轮用量未受影响（7/3 保持），但第一轮迟到回执污染活动流"
+    }
+  ],
+  "summary": {
+    "total": 5,
+    "passed": 1,
+    "failed": 4,
+    "violations_total": 7,
+    "usage_corrupted_cases": 2
+  }
+}

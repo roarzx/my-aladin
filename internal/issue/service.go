@@ -243,10 +243,17 @@ func (s *Service) ApplyTurnDone(ctx context.Context, executionID string, data ma
 	}
 
 	reply := stringField(data, "reply")
-	if _, err := mysqlstore.FinishIssueRun(ctx, s.DB, run.ID,
+	// 条件更新同时充当围栏：没命中的回执属于已落定的轮次（取消、失败或重复上报）。
+	// 这些回执不能再写任何副作用，否则会话、活动流与用量都会被过期结果污染。
+	final, err := mysqlstore.FinishIssueRun(ctx, s.DB, run.ID,
 		[]domain.RunStatus{domain.RunDispatched, domain.RunRunning},
-		domain.RunCompleted, reply, "", ""); err != nil {
+		domain.RunCompleted, reply, "", "")
+	if err != nil {
 		return err
+	}
+	if !final {
+		s.log().Debug("忽略过期完成回执", "execution", executionID, "run", run.ID)
+		return nil
 	}
 	// 用量快照：统计与看板直接按列聚合，不再反解活动 JSON。
 	model := ""
@@ -298,10 +305,15 @@ func (s *Service) ApplyTurnFail(ctx context.Context, executionID string, data ma
 	}
 	reason := stringField(data, "reason")
 	errorClass := stringField(data, "error_class")
-	if _, err := mysqlstore.FinishIssueRun(ctx, s.DB, run.ID,
+	final, err := mysqlstore.FinishIssueRun(ctx, s.DB, run.ID,
 		[]domain.RunStatus{domain.RunDispatched, domain.RunRunning},
-		domain.RunFailed, "", errorClass, reason); err != nil {
+		domain.RunFailed, "", errorClass, reason)
+	if err != nil {
 		return err
+	}
+	if !final {
+		s.log().Debug("忽略过期失败回执", "execution", executionID, "run", run.ID)
+		return nil
 	}
 	_, _ = mysqlstore.AppendActivity(ctx, s.DB, run.TaskID, "turn.failed", map[string]any{
 		"run_id": run.ID, "reason": reason, "error_class": errorClass,

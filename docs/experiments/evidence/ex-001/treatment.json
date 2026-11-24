@@ -1,0 +1,22 @@
+{
+  "experiment": "EX-001",
+  "phase": "treatment",
+  "change": "ApplyTurnDone/ApplyTurnFail 以 FinishIssueRun 的返回值为围栏；未命中直接返回，不写副作用",
+  "changed_files": ["internal/issue/service.go"],
+  "command": "go test -tags=e2e ./tests/e2e/... -run TestRecovery -count=1 -v",
+  "log": "docs/experiments/evidence/ex-001/treatment.log",
+  "results": [
+    { "case_id": "R1", "name": "stale run cleanup", "passed": true },
+    { "case_id": "R2", "name": "late turn_done after fail", "passed": true },
+    { "case_id": "R3", "name": "duplicate turn_done", "passed": true },
+    { "case_id": "R4", "name": "late turn_fail after completed", "passed": true },
+    { "case_id": "R5", "name": "stale across turns", "passed": true }
+  ],
+  "regression": {
+    "go_vet": "pass",
+    "go_test": "pass",
+    "e2e_full": "pass",
+    "integration": "pass"
+  },
+  "summary": { "total": 5, "passed": 5, "failed": 0, "violations_total": 0 }
+}
