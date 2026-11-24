@@ -25,3 +25,7 @@ web/.vite/
 .DS_Store
 .idea/
 .vscode/
+
+# 评测构建产物
+evals/swebench/.build/
+evals/jobs/

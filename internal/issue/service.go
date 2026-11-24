@@ -130,6 +130,7 @@ func (s *Service) StartTurn(ctx context.Context, taskID, prompt string) (domain.
 		ACPSessionID:      sessionRecord.ACPSessionID,
 		Prompt:            prompt,
 		SystemPrompt:      agentConfig.SystemPrompt,
+		EvalMode:          agentConfig.EvalMode,
 		WorkDir:           agentConfig.WorkDir,
 		RepoURL:           repo.URL,
 		RepoDefaultBranch: repo.DefaultBranch,
@@ -250,6 +251,9 @@ func (s *Service) ApplyTurnDone(ctx context.Context, executionID string, data ma
 			"text": reply, "run_id": run.ID,
 		})
 	}
+	// 评测任务不追加平台上报提示词，Agent 不会自己报状态；一轮结束即进入
+	// 「等待验收」，判分结果由外部 harness 回填。
+	s.pauseEvalIssue(ctx, run)
 	_, _ = mysqlstore.AppendActivity(ctx, s.DB, run.TaskID, "turn.done", map[string]any{
 		"run_id":        run.ID,
 		"duration_ms":   intField(data, "duration_ms"),
@@ -309,6 +313,21 @@ func (s *Service) FailStaleRuns(ctx context.Context, machineID string) int {
 		s.log().Info("已清理未收尾执行", "machine", machineID, "count", failed)
 	}
 	return failed
+}
+
+// pauseEvalIssue 把评测 Issue 从「执行中」落到「等待验收」。
+func (s *Service) pauseEvalIssue(ctx context.Context, run domain.IssueRun) {
+	agentConfig, err := mysqlstore.GetAgent(ctx, s.DB, run.AgentID)
+	if err != nil || !agentConfig.EvalMode {
+		return
+	}
+	task, err := mysqlstore.GetTask(ctx, s.DB, run.TaskID)
+	if err != nil || task.Status != domain.TaskExecuting {
+		return
+	}
+	if err := setStatus(ctx, s.DB, &task, domain.TaskPaused, "本轮结束，等待验收", "platform"); err != nil {
+		s.log().Warn("评测 Issue 状态落库失败", "issue", run.TaskID, "err", err)
+	}
 }
 
 // MarkRunning 在收到首帧流式输出时把执行推进为 running。

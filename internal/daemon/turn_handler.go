@@ -53,6 +53,8 @@ type turnParams struct {
 	RepoDefault  string `json:"repo_default_branch"`
 	Branch       string `json:"branch"`
 	IssueTitle   string `json:"issue_title"`
+	// EvalMode 是外部判分任务：不上报产物、不追加平台提示词、放宽单轮超时。
+	EvalMode bool `json:"eval_mode"`
 }
 
 // Handle 实现 CommandHandler；立即接受，执行在后台进行。
@@ -115,6 +117,10 @@ func (h *TurnHandler) run(ctx context.Context, params turnParams, sender Sender)
 	cfg := h.ProviderConfig
 	cfg.Cwd = workDir
 	cfg.Env = append(cfg.Env, h.platformEnv(params)...)
+	if params.EvalMode {
+		// 评测任务动辄十几分钟到一小时，30 分钟的默认上限会误杀。
+		cfg.InputTimeout = evalTurnTimeout
+	}
 
 	var workspace *Workspace
 	if params.RepoURL != "" {
@@ -205,8 +211,10 @@ func (h *TurnHandler) run(ctx context.Context, params turnParams, sender Sender)
 				return
 			}
 		}
-		// 产物上传失败不影响结果，只记日志。
-		h.uploadArtifacts(ctx, params, workDir, runStarted)
+		// 产物上传失败不影响结果，只记日志；评测任务不传（改由 harness 取 patch）。
+		if !params.EvalMode {
+			h.uploadArtifacts(ctx, params, workDir, runStarted)
+		}
 		if err := sender.SendEvent("turn_done", params.ExecutionID, map[string]any{
 			"summary_digest": summaryDigest,
 			"commit_sha":     commitSHA,
@@ -505,8 +513,16 @@ func (h *TurnHandler) cliDir() string {
 	return dir
 }
 
+// evalTurnTimeout 是评测模式下单轮的上限。
+const evalTurnTimeout = 4 * time.Hour
+
 // platformInstructions 告诉 Agent 唯一的完成通道：CLI 上报。
+//
+// 评测模式下不追加：这段文字会改变提示词分布，让不同 Agent 之间的结果不可比。
 func (h *TurnHandler) platformInstructions(params turnParams) string {
+	if params.EvalMode {
+		return ""
+	}
 	if h.APIURL == "" || h.Token == "" || params.IssueID == "" {
 		return ""
 	}

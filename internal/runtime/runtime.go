@@ -18,6 +18,8 @@ type DispatchRequest struct {
 	ACPSessionID string
 	Prompt       string
 	SystemPrompt string
+	// EvalMode 表示这是外部判分任务：不上报产物、不追加平台提示词、放宽单轮超时。
+	EvalMode bool
 	// WorkDir 是 Agent 在机器上的工作目录（绝对路径）。
 	WorkDir string
 	// RepoURL 是任务绑定的仓库地址，可为空。

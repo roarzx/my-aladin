@@ -111,6 +111,7 @@ func (h *Hub) Dispatch(ctx context.Context, req runtime.DispatchRequest) (string
 		"acp_session_id":      req.ACPSessionID,
 		"prompt":              req.Prompt,
 		"system_prompt":       req.SystemPrompt,
+		"eval_mode":           req.EvalMode,
 		"work_dir":            req.WorkDir,
 		"repo_url":            req.RepoURL,
 		"repo_default_branch": req.RepoDefaultBranch,

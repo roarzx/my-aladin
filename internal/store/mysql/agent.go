@@ -11,7 +11,7 @@ import (
 
 const agentColumns = `id, workspace_id, name, owner_id, visibility, runtime_type,
 	machine_id, work_dir, model, thinking_level, system_prompt,
-	capability_set, env_vars, enabled`
+	capability_set, env_vars, enabled, eval_mode`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -25,11 +25,12 @@ func scanAgent(row rowScanner) (agent.Agent, error) {
 		model         sql.NullString
 		thinkingLevel sql.NullString
 		enabled       bool
+		evalMode      bool
 	)
 	err := row.Scan(
 		&a.ID, &a.WorkspaceID, &a.Name, &a.OwnerID, &visibility, &runtimeType,
 		&a.MachineID, &a.WorkDir, &model, &thinkingLevel, &a.SystemPrompt,
-		&a.CapabilitySet, &a.EnvVars, &enabled,
+		&a.CapabilitySet, &a.EnvVars, &enabled, &evalMode,
 	)
 	if err != nil {
 		return agent.Agent{}, err
@@ -39,6 +40,7 @@ func scanAgent(row rowScanner) (agent.Agent, error) {
 	a.Model = model.String
 	a.ThinkingLevel = thinkingLevel.String
 	a.Enabled = enabled
+	a.EvalMode = evalMode
 	return a, nil
 }
 
@@ -60,11 +62,11 @@ func CreateAgent(ctx context.Context, ex Executor, a agent.Agent) error {
 	_, err := ex.ExecContext(ctx, `
 		INSERT INTO agents (id, workspace_id, name, owner_id, visibility, runtime_type,
 			machine_id, work_dir, model, thinking_level, system_prompt,
-			capability_set, env_vars, enabled)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			capability_set, env_vars, enabled, eval_mode)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.WorkspaceID, a.Name, a.OwnerID, string(a.Visibility), string(a.RuntimeType),
 		a.MachineID, a.WorkDir, model, thinking, a.SystemPrompt,
-		a.CapabilitySet, a.EnvVars, a.Enabled)
+		a.CapabilitySet, a.EnvVars, a.Enabled, a.EvalMode)
 	if isDuplicateKey(err) {
 		return ErrAgentNameTaken
 	}
@@ -149,11 +151,11 @@ func UpdateAgent(ctx context.Context, ex Executor, a agent.Agent) error {
 	res, err := ex.ExecContext(ctx, `
 		UPDATE agents SET name = ?, visibility = ?, runtime_type = ?, machine_id = ?,
 			work_dir = ?, model = ?, thinking_level = ?, system_prompt = ?,
-			capability_set = ?, env_vars = ?, enabled = ?
+			capability_set = ?, env_vars = ?, enabled = ?, eval_mode = ?
 		WHERE id = ?`,
 		a.Name, string(a.Visibility), string(a.RuntimeType), a.MachineID,
 		a.WorkDir, model, thinking, a.SystemPrompt,
-		a.CapabilitySet, a.EnvVars, a.Enabled, a.ID)
+		a.CapabilitySet, a.EnvVars, a.Enabled, a.EvalMode, a.ID)
 	if isDuplicateKey(err) {
 		return ErrAgentNameTaken
 	}

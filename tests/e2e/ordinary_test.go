@@ -308,3 +308,22 @@ func TestFailStaleRunsUnblocksIssue(t *testing.T) {
 		t.Fatalf("清理后应能继续: %v", err)
 	}
 }
+
+func TestEvalModePausesAfterTurn(t *testing.T) {
+	env := setupIssue(t)
+	ctx := context.Background()
+	taskID := env.createIssue(t, "评测任务")
+	if _, err := env.db.Exec(`UPDATE agents SET eval_mode = 1 WHERE id = ?`, env.agentID); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := env.service.StartTurn(ctx, taskID, "修一下")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.event(t, "turn_done", run.ExecutionID, map[string]any{"reply": "改好了"})
+
+	if got := env.status(t, taskID); got != domain.TaskPaused {
+		t.Fatalf("评测轮结束后应为 paused（等待验收），实际 %q", got)
+	}
+}

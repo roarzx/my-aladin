@@ -1,0 +1,15 @@
+# 一个实例 = 一台机器（题目容器）+ 一个 Agent + 一个 Issue。
+# run-instance.sh 读取这份文件；值都可以被同名环境变量覆盖。
+instance: sympy__sympy-20590
+image: swebench/sweb.eval.x86_64.sympy_1776_sympy-20590:latest
+# swebench 官方镜像多为 amd64；arm 机器上走 QEMU，测试会慢 5-10 倍。
+platform: linux/amd64
+base_commit: cffd4e0f86fefd4802349a9f9b19ed70934ea354
+work_dir: /testbed
+control_plane: http://127.0.0.1:8080
+# 留空则用第一个工作区
+workspace_id: ""
+machine_name: swebench-sympy-20590
+agent_name: swebench-agent
+# Issue 名称，留空用 instance
+issue_name: ""

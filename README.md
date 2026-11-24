@@ -35,6 +35,12 @@ export REDIS_ADDR=127.0.0.1:6379 ALADDIN_ADMIN_TOKEN=devtoken
 ./bin/server
 ```
 
+## 评测接入
+
+SWE-bench Verified 式接入的 MVP 见 [`evals/README.md`](evals/README.md)：
+一条命令把官方题目镜像跑起来、注册评测 Agent（`evalMode`）、开会话、导出补丁；
+判分交给外部 harness。
+
 ## 验证
 
 ```bash

@@ -97,6 +97,7 @@ type agentView struct {
 	CapabilitySet json.RawMessage `json:"capabilitySet"`
 	EnvVars       json.RawMessage `json:"envVars"`
 	Enabled       bool            `json:"enabled"`
+	EvalMode      bool            `json:"evalMode"`
 }
 
 func newAgentView(a agent.Agent) agentView {
@@ -115,6 +116,7 @@ func newAgentView(a agent.Agent) agentView {
 		CapabilitySet: jsonOrEmptyObject(a.CapabilitySet),
 		EnvVars:       jsonOrEmptyObject(a.EnvVars),
 		Enabled:       a.Enabled,
+		EvalMode:      a.EvalMode,
 	}
 }
 
@@ -354,6 +356,7 @@ type agentBody struct {
 	CapabilitySet *json.RawMessage `json:"capabilitySet"`
 	EnvVars       *json.RawMessage `json:"envVars"`
 	Enabled       *bool            `json:"enabled"`
+	EvalMode      *bool            `json:"evalMode"`
 }
 
 // createAgent 处理 POST /agents。
@@ -419,6 +422,9 @@ func (h *ControlPlane) createAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Enabled != nil {
 		a.Enabled = *body.Enabled
+	}
+	if body.EvalMode != nil {
+		a.EvalMode = *body.EvalMode
 	}
 	var err error
 	if a.CapabilitySet, err = normalizeJSONObject(body.CapabilitySet); err != nil {
@@ -537,6 +543,9 @@ func (h *ControlPlane) patchAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Enabled != nil {
 		current.Enabled = *body.Enabled
+	}
+	if body.EvalMode != nil {
+		current.EvalMode = *body.EvalMode
 	}
 
 	if err := mysqlstore.UpdateAgent(r.Context(), h.DB, current); err != nil {

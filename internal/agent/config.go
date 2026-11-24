@@ -47,6 +47,9 @@ type Agent struct {
 	CapabilitySet json.RawMessage
 	EnvVars       json.RawMessage
 	Enabled       bool
+	// EvalMode 表示这个 Agent 跑的是外部判分任务（SWE-bench 等）：
+	// 不上报产物、不追加平台上报提示词、单轮超时放宽，判分由外部 harness 负责。
+	EvalMode bool
 }
 
 // VisibleTo 表示该 Agent 是否出现在 userID 的可选列表中。
