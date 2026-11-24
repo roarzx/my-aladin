@@ -183,6 +183,13 @@ func (s *Service) Message(ctx context.Context, taskID, content string) (domain.I
 		return domain.IssueRun{}, errcode.Newf(errcode.ValidationFailed,
 			"消息超过 %d 字", MaxMessageRunes)
 	}
+	// 执行中直接拒绝：消息一旦落库就会永久留在会话里，但这一轮不会去执行它，
+	// 会话会出现「用户说了一句话，Agent 从未回应」的假象。
+	if _, active, err := mysqlstore.ActiveIssueRun(ctx, s.DB, taskID); err != nil {
+		return domain.IssueRun{}, errcode.New(errcode.UpstreamUnavailable, "读取执行状态失败")
+	} else if active {
+		return domain.IssueRun{}, errcode.New(errcode.Conflict, "已有执行进行中，这条消息没有发送")
+	}
 	// 先落用户消息，保证会话顺序在 turn.started 之前。
 	if _, err := mysqlstore.AppendActivity(ctx, s.DB, taskID, "message.user",
 		map[string]any{"text": content}); err != nil {
