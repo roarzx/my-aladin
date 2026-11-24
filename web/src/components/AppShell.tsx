@@ -4,6 +4,7 @@ import { Link, useRouter } from '../router'
 import {
   IconAutomation,
   IconBox,
+  IconChart,
   IconChat,
   IconChevronDown,
   IconClose,
@@ -37,6 +38,7 @@ interface NavGroup {
 
 const TOP_ITEMS: Array<NavItem & { icon: ReactNode }> = [
   { to: '/', label: '首页', icon: <IconHome /> },
+  { to: '/monitor/execution', label: '执行分析', icon: <IconChart /> },
   { to: '/task/list', label: '我的 Issue', icon: <IconIssue /> },
   { to: '/conversations', label: '对话', icon: <IconChat /> },
   { to: '/task-schedules', label: '自动化', icon: <IconAutomation /> },

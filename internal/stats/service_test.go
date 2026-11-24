@@ -70,12 +70,13 @@ func TestRenderPrometheus(t *testing.T) {
 			Finished:    2,
 			Succeeded:   1,
 			SuccessRate: 0.5,
+			ErrorRate:   0.5,
 			Durations:   map[string][]int64{"completed": {61000}, "failed": {30000}},
 			P50Ms:       30000,
 			P95Ms:       61000,
 		},
 		Failures:   []NamedCount{{Name: "network", Count: 1}},
-		Tools:      []NamedCount{{Name: "ls", Count: 3, Failed: 1}},
+		Tools:      []ToolStat{{Name: "ls", Count: 3, Failed: 1, P50Ms: 120, P95Ms: 400}},
 		ToolsByDay: []DayCount{{Date: "2026-11-24", Count: 3}},
 		Tokens: TokenStats{
 			Input:   1000,
@@ -83,7 +84,13 @@ func TestRenderPrometheus(t *testing.T) {
 			ByModel: []ModelTokens{{Model: "claude-sonnet-5-5", Input: 1000, Output: 200}},
 			Daily:   []DayTokens{{Date: "2026-11-24", Input: 1000, Output: 200}},
 		},
-		Machines: []NamedCount{{Name: "online", Count: 1}},
+		Machines:     []NamedCount{{Name: "online", Count: 1}},
+		Availability: 0.5,
+		Agents: []AgentStats{{
+			AgentID: "agent-123456", Name: "Claude", RuntimeType: "claude_code",
+			Runs: 2, Finished: 2, Succeeded: 1, Failed: 1,
+			InputTokens: 900, OutputTokens: 90,
+		}},
 	}
 	text := RenderPrometheus(overview)
 
@@ -99,6 +106,11 @@ func TestRenderPrometheus(t *testing.T) {
 		`aladdin_tool_calls_total{tool="ls",status="failed"} 1`,
 		`aladdin_tokens_total{direction="input",model="claude-sonnet-5-5"} 1000`,
 		`aladdin_machines{status="online"} 1`,
+		`aladdin_machines_availability 0.5000`,
+		`aladdin_run_error_ratio 0.5000`,
+		`aladdin_tool_duration_seconds{tool="ls",quantile="0.5"} 0.12`,
+		`aladdin_agent_runs_total{agent="Claude/agent-12",runtime="claude_code",status="completed"} 1`,
+		`aladdin_agent_tokens_total{agent="Claude/agent-12",direction="input"} 900`,
 	}
 	for _, want := range wants {
 		if !strings.Contains(text, want) {

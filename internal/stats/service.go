@@ -1,8 +1,8 @@
 // Package stats 把执行记录与事件聚合成监控数据（P0）。
 //
-// 数据全部来自 MySQL：issue_runs 提供每轮的状态、耗时与用量，
-// activities 提供 Issue 状态变更与工具调用。这里不做常驻内存计数器，
-// 而是按窗口查询并短缓存——重启不丢数，也不会因为重复事件重复计数。
+// 数据全部来自 MySQL：issue_runs 提供每轮的状态、耗时、用量与 Agent 归属，
+// activities 提供 Issue 状态变更与工具调用。这里不做常驻内存计数器，而是
+// 按窗口查询并短缓存——重启不丢数，也不会因为重复事件重复计数。
 package stats
 
 import (
@@ -41,10 +41,13 @@ type Overview struct {
 	Issues      IssueStats   `json:"issues"`
 	Runs        RunStats     `json:"runs"`
 	Failures    []NamedCount `json:"failures"`
-	Tools       []NamedCount `json:"tools"`
+	Tools       []ToolStat   `json:"tools"`
 	ToolsByDay  []DayCount   `json:"toolsByDay"`
 	Tokens      TokenStats   `json:"tokens"`
 	Machines    []NamedCount `json:"machines"`
+	// Availability 是机器在线率（online / 全部登记机器）。
+	Availability float64      `json:"availability"`
+	Agents       []AgentStats `json:"agents"`
 }
 
 // IssueStats 是 Issue 层面的现状与每日趋势。
@@ -61,9 +64,14 @@ type RunStats struct {
 	ByStatus    map[string]int `json:"byStatus"`
 	Finished    int            `json:"finished"`
 	Succeeded   int            `json:"succeeded"`
+	Failed      int            `json:"failed"`
+	Cancelled   int            `json:"cancelled"`
 	SuccessRate float64        `json:"successRate"`
+	ErrorRate   float64        `json:"errorRate"`
 	P50Ms       int64          `json:"p50Ms"`
 	P95Ms       int64          `json:"p95Ms"`
+	// Retried 是同一 Issue 的第 2 轮及以后的执行数（含用户追加消息）。
+	Retried int `json:"retried"`
 	// Durations 是各状态终态轮次的耗时样本（毫秒），渲染直方图用，不进 JSON。
 	Durations map[string][]int64 `json:"-"`
 }
@@ -90,17 +98,44 @@ type DayTokens struct {
 	Output int64  `json:"output"`
 }
 
+// ToolStat 是某个工具的调用次数与耗时。
+type ToolStat struct {
+	Name   string `json:"name"`
+	Count  int    `json:"count"`
+	Failed int    `json:"failed"`
+	P50Ms  int64  `json:"p50Ms"`
+	P95Ms  int64  `json:"p95Ms"`
+}
+
+// AgentStats 是单个 Agent 在当前窗口内的执行画像。
+type AgentStats struct {
+	AgentID      string    `json:"agentId"`
+	Name         string    `json:"name"`
+	RuntimeType  string    `json:"runtimeType"`
+	Model        string    `json:"model"`
+	Runs         int       `json:"runs"`
+	Finished     int       `json:"finished"`
+	Succeeded    int       `json:"succeeded"`
+	Failed       int       `json:"failed"`
+	SuccessRate  float64   `json:"successRate"`
+	P50Ms        int64     `json:"p50Ms"`
+	P95Ms        int64     `json:"p95Ms"`
+	InputTokens  int64     `json:"inputTokens"`
+	OutputTokens int64     `json:"outputTokens"`
+	ToolCalls    int       `json:"toolCalls"`
+	LastRunAt    time.Time `json:"lastRunAt"`
+}
+
 // DayCount 是某一天的计数。
 type DayCount struct {
 	Date  string `json:"date"`
 	Count int    `json:"count"`
 }
 
-// NamedCount 是带名字的计数（失败分类、工具名、机器状态）。
+// NamedCount 是带名字的计数（失败分类、机器状态）。
 type NamedCount struct {
-	Name   string `json:"name"`
-	Count  int    `json:"count"`
-	Failed int    `json:"failed,omitempty"`
+	Name  string `json:"name"`
+	Count int    `json:"count"`
 }
 
 // Overview 返回最近 days 天的聚合结果（含缓存）。
@@ -184,7 +219,10 @@ func (s *Service) load(ctx context.Context, days int) (Overview, error) {
 	if err := s.loadTokens(ctx, since, dates, &overview); err != nil {
 		return Overview{}, err
 	}
-	if overview.Machines, err = s.machines(ctx); err != nil {
+	if overview.Machines, overview.Availability, err = s.machines(ctx); err != nil {
+		return Overview{}, err
+	}
+	if err := s.loadAgents(ctx, since, &overview); err != nil {
 		return Overview{}, err
 	}
 	return overview, nil
@@ -241,27 +279,38 @@ func (s *Service) dayCounts(ctx context.Context, query string, since time.Time, 
 
 func (s *Service) loadRuns(ctx context.Context, since time.Time, overview *Overview) error {
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT status, COALESCE(error_class, ''),
-		       TIMESTAMPDIFF(MICROSECOND, created_at, updated_at) DIV 1000
-		  FROM issue_runs WHERE created_at >= ?`, since)
+		SELECT task_id, agent_id, status, COALESCE(error_class, ''),
+		       TIMESTAMPDIFF(MICROSECOND, created_at, updated_at) DIV 1000,
+		       input_tokens, output_tokens, created_at
+		  FROM issue_runs WHERE created_at >= ?
+		  ORDER BY created_at ASC`, since)
 	if err != nil {
 		return fmt.Errorf("统计执行轮次: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	var all []int64
-	failures := make(map[string]int)
+	var (
+		all      []int64
+		failures = make(map[string]int)
+		seenTask = make(map[string]bool)
+	)
 	for rows.Next() {
 		var (
-			status string
-			class  string
-			durMs  int64
+			taskID, agentID, status, class string
+			durMs                          int64
+			input, output                  int64
+			createdAt                      time.Time
 		)
-		if err := rows.Scan(&status, &class, &durMs); err != nil {
+		if err := rows.Scan(&taskID, &agentID, &status, &class, &durMs,
+			&input, &output, &createdAt); err != nil {
 			return err
 		}
 		overview.Runs.Total++
 		overview.Runs.ByStatus[status]++
+		if seenTask[taskID] {
+			overview.Runs.Retried++
+		}
+		seenTask[taskID] = true
 		if class != "" {
 			failures[class]++
 		}
@@ -270,8 +319,13 @@ func (s *Service) loadRuns(ctx context.Context, since time.Time, overview *Overv
 			continue
 		}
 		overview.Runs.Finished++
-		if status == "completed" {
+		switch status {
+		case "completed":
 			overview.Runs.Succeeded++
+		case "failed":
+			overview.Runs.Failed++
+		case "cancelled":
+			overview.Runs.Cancelled++
 		}
 		if durMs > 0 {
 			overview.Runs.Durations[status] = append(overview.Runs.Durations[status], durMs)
@@ -284,6 +338,7 @@ func (s *Service) loadRuns(ctx context.Context, since time.Time, overview *Overv
 
 	if overview.Runs.Finished > 0 {
 		overview.Runs.SuccessRate = float64(overview.Runs.Succeeded) / float64(overview.Runs.Finished)
+		overview.Runs.ErrorRate = float64(overview.Runs.Failed) / float64(overview.Runs.Finished)
 	}
 	slices.Sort(all)
 	overview.Runs.P50Ms = percentile(all, 50)
@@ -305,7 +360,8 @@ func (s *Service) loadTools(ctx context.Context, since time.Time, overview *Over
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(a.payload, '$.tool_kind')), ''),
 		       COALESCE(JSON_UNQUOTE(JSON_EXTRACT(a.payload, '$.title')), ''),
-		       COALESCE(JSON_UNQUOTE(JSON_EXTRACT(a.payload, '$.status')), '')
+		       COALESCE(JSON_UNQUOTE(JSON_EXTRACT(a.payload, '$.status')), ''),
+		       CAST(COALESCE(JSON_EXTRACT(a.payload, '$.duration_ms'), 0) AS SIGNED)
 		  FROM activities a JOIN tasks t ON t.id = a.task_id
 		 WHERE a.kind = 'tool.call' AND a.created_at >= ?`, since)
 	if err != nil {
@@ -313,26 +369,57 @@ func (s *Service) loadTools(ctx context.Context, since time.Time, overview *Over
 	}
 	defer func() { _ = rows.Close() }()
 
-	counts := make(map[string]int)
-	failed := make(map[string]int)
+	type aggregate struct {
+		count  int
+		failed int
+		ms     []int64
+	}
+	byTool := make(map[string]*aggregate)
 	for rows.Next() {
 		var kind, title, status string
-		if err := rows.Scan(&kind, &title, &status); err != nil {
+		var duration int64
+		if err := rows.Scan(&kind, &title, &status, &duration); err != nil {
 			return err
 		}
 		name := ToolName(kind, title)
-		counts[name]++
+		entry := byTool[name]
+		if entry == nil {
+			entry = &aggregate{}
+			byTool[name] = entry
+		}
+		entry.count++
 		if status == "failed" {
-			failed[name]++
+			entry.failed++
+		}
+		if duration > 0 {
+			entry.ms = append(entry.ms, duration)
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	overview.Tools = topN(counts, 8, "其他")
-	for i := range overview.Tools {
-		overview.Tools[i].Failed = failed[overview.Tools[i].Name]
+
+	tools := make([]ToolStat, 0, len(byTool))
+	for name, entry := range byTool {
+		slices.Sort(entry.ms)
+		tools = append(tools, ToolStat{
+			Name:   name,
+			Count:  entry.count,
+			Failed: entry.failed,
+			P50Ms:  percentile(entry.ms, 50),
+			P95Ms:  percentile(entry.ms, 95),
+		})
 	}
+	sort.Slice(tools, func(i, j int) bool {
+		if tools[i].Count != tools[j].Count {
+			return tools[i].Count > tools[j].Count
+		}
+		return tools[i].Name < tools[j].Name
+	})
+	if len(tools) > 8 {
+		tools = tools[:8]
+	}
+	overview.Tools = tools
 	return nil
 }
 
@@ -402,27 +489,138 @@ func (s *Service) loadTokens(ctx context.Context, since time.Time, dates []strin
 	return nil
 }
 
-func (s *Service) machines(ctx context.Context) ([]NamedCount, error) {
+// loadAgents 按 Agent 维度聚合执行轮次、耗时、token 与工具调用。
+func (s *Service) loadAgents(ctx context.Context, since time.Time, overview *Overview) error {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT r.agent_id, COALESCE(ag.name, ''), COALESCE(ag.runtime_type, ''),
+		       COALESCE(ag.model, ''), r.status,
+		       TIMESTAMPDIFF(MICROSECOND, r.created_at, r.updated_at) DIV 1000,
+		       r.input_tokens, r.output_tokens, r.created_at
+		  FROM issue_runs r
+		  LEFT JOIN agents ag ON ag.id = r.agent_id
+		 WHERE r.created_at >= ?`, since)
+	if err != nil {
+		return fmt.Errorf("统计 Agent 执行: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	byAgent := make(map[string]*AgentStats)
+	durations := make(map[string][]int64)
+	for rows.Next() {
+		var (
+			agentID, name, runtimeType, model, status string
+			durMs, input, output                      int64
+			createdAt                                 time.Time
+		)
+		if err := rows.Scan(&agentID, &name, &runtimeType, &model, &status,
+			&durMs, &input, &output, &createdAt); err != nil {
+			return err
+		}
+		entry := byAgent[agentID]
+		if entry == nil {
+			entry = &AgentStats{AgentID: agentID, Name: name, RuntimeType: runtimeType, Model: model}
+			byAgent[agentID] = entry
+		}
+		entry.Runs++
+		entry.InputTokens += input
+		entry.OutputTokens += output
+		if createdAt.After(entry.LastRunAt) {
+			entry.LastRunAt = createdAt
+		}
+		if !isTerminalRun(status) {
+			continue
+		}
+		entry.Finished++
+		switch status {
+		case "completed":
+			entry.Succeeded++
+		case "failed":
+			entry.Failed++
+		}
+		if durMs > 0 {
+			durations[agentID] = append(durations[agentID], durMs)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	// 工具调用按 run 归属到 Agent。
+	toolRows, err := s.DB.QueryContext(ctx, `
+		SELECT r.agent_id, COUNT(*)
+		  FROM activities a
+		  JOIN tasks t ON t.id = a.task_id
+		  JOIN issue_runs r ON r.id = JSON_UNQUOTE(JSON_EXTRACT(a.payload, '$.run_id'))
+		 WHERE a.kind = 'tool.call' AND a.created_at >= ?
+		 GROUP BY r.agent_id`, since)
+	if err != nil {
+		return fmt.Errorf("统计 Agent 工具调用: %w", err)
+	}
+	defer func() { _ = toolRows.Close() }()
+	for toolRows.Next() {
+		var agentID string
+		var count int
+		if err := toolRows.Scan(&agentID, &count); err != nil {
+			return err
+		}
+		if entry := byAgent[agentID]; entry != nil {
+			entry.ToolCalls = count
+		}
+	}
+	if err := toolRows.Err(); err != nil {
+		return err
+	}
+
+	agents := make([]AgentStats, 0, len(byAgent))
+	for id, entry := range byAgent {
+		samples := durations[id]
+		slices.Sort(samples)
+		entry.P50Ms = percentile(samples, 50)
+		entry.P95Ms = percentile(samples, 95)
+		if entry.Finished > 0 {
+			entry.SuccessRate = float64(entry.Succeeded) / float64(entry.Finished)
+		}
+		agents = append(agents, *entry)
+	}
+	sort.Slice(agents, func(i, j int) bool {
+		if agents[i].Runs != agents[j].Runs {
+			return agents[i].Runs > agents[j].Runs
+		}
+		return agents[i].Name < agents[j].Name
+	})
+	overview.Agents = agents
+	return nil
+}
+
+func (s *Service) machines(ctx context.Context) ([]NamedCount, float64, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT status, COUNT(*) FROM machines GROUP BY status`)
 	if err != nil {
-		return nil, fmt.Errorf("统计机器状态: %w", err)
+		return nil, 0, fmt.Errorf("统计机器状态: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
 	var out []NamedCount
+	total, online := 0, 0
 	for rows.Next() {
 		var status string
 		var count int
 		if err := rows.Scan(&status, &count); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, NamedCount{Name: status, Count: count})
+		total += count
+		if status == "online" {
+			online = count
+		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
+	if total == 0 {
+		return out, 0, nil
+	}
+	return out, float64(online) / float64(total), nil
 }
 
 // percentile 用最近秩法计算分位数；样本为空时返回 0。

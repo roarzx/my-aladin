@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/roarzx/my-aladin/internal/agentevent"
 	"github.com/roarzx/my-aladin/internal/transport/acp"
 	"github.com/roarzx/my-aladin/pkg/protocol"
 )
@@ -571,5 +572,24 @@ func TestTurnHandlerSeparatesNarrationFromReply(t *testing.T) {
 	}
 	if got := last.data["narration"]; got != "Let me look at the file first." {
 		t.Fatalf("narration = %q", got)
+	}
+}
+
+// session/load 重放的旧工具调用只有 id、没有标题，不应重复上报。
+func TestHandleToolSkipsTitleLessReplay(t *testing.T) {
+	tools := make(map[string]*toolState)
+	var emitted []map[string]any
+	emit := func(_ string, data map[string]any) { emitted = append(emitted, data) }
+
+	handleTool(tools, emit, agentevent.Event{ToolCallID: "t1", Status: "pending"})
+	handleTool(tools, emit, agentevent.Event{ToolCallID: "t1", Status: "completed"})
+	if len(emitted) != 0 {
+		t.Fatalf("无标题的重放不应上报: %+v", emitted)
+	}
+
+	handleTool(tools, emit, agentevent.Event{ToolCallID: "t2", Title: "ls -la", Status: "pending"})
+	handleTool(tools, emit, agentevent.Event{ToolCallID: "t2", Status: "completed"})
+	if len(emitted) != 1 || emitted[0]["title"] != "ls -la" {
+		t.Fatalf("正常调用应上报一次: %+v", emitted)
 	}
 }

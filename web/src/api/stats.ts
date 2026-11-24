@@ -16,13 +16,38 @@ export interface DayTokens {
 export interface NamedCount {
   name: string
   count: number
-  failed?: number
+}
+
+export interface ToolStat {
+  name: string
+  count: number
+  failed: number
+  p50Ms: number
+  p95Ms: number
 }
 
 export interface ModelTokens {
   model: string
   input: number
   output: number
+}
+
+export interface AgentStats {
+  agentId: string
+  name: string
+  runtimeType: string
+  model: string
+  runs: number
+  finished: number
+  succeeded: number
+  failed: number
+  successRate: number
+  p50Ms: number
+  p95Ms: number
+  inputTokens: number
+  outputTokens: number
+  toolCalls: number
+  lastRunAt: string
 }
 
 export interface StatsOverview {
@@ -39,12 +64,16 @@ export interface StatsOverview {
     byStatus: Record<string, number>
     finished: number
     succeeded: number
+    failed: number
+    cancelled: number
     successRate: number
+    errorRate: number
     p50Ms: number
     p95Ms: number
+    retried: number
   }
   failures: NamedCount[]
-  tools: NamedCount[]
+  tools: ToolStat[]
   toolsByDay: DayCount[]
   tokens: {
     input: number
@@ -53,6 +82,8 @@ export interface StatsOverview {
     daily: DayTokens[]
   }
   machines: NamedCount[]
+  availability: number
+  agents: AgentStats[]
 }
 
 export function fetchStats(days = 7): Promise<StatsOverview> {

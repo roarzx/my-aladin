@@ -4,6 +4,7 @@ import { RouterProvider, useRouter } from './router'
 import { currentToken } from './api/issues'
 import TokenGate from './pages/TokenGate'
 import Dashboard from './pages/Dashboard'
+import ExecutionAnalysis from './pages/ExecutionAnalysis'
 import IssueList from './pages/IssueList'
 import CreateTask from './pages/CreateTask'
 import IssueCockpit from './pages/IssueCockpit'
@@ -36,6 +37,7 @@ import NotFound from './pages/NotFound'
 /** 路由表对照 hercules-frontend：http(s)://gateway.myscrm.cn/hercules-frontend/#/… */
 const ROUTES: Record<string, ComponentType> = {
   '/': Dashboard,
+  '/monitor/execution': ExecutionAnalysis,
   '/task/list': IssueList,
   '/task/create': CreateTask,
   '/conversations': Conversations,

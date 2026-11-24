@@ -1,11 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 
 import { fetchIssues, type Task, type TaskStatus } from '../api/issues'
 import { fetchStats, type DayCount, type DayTokens, type NamedCount, type StatsOverview } from '../api/stats'
 import AppShell from '../components/AppShell'
 import { EmptyState, MetricCard, StateDot, StateTag, type TagTone } from '../components/ui'
-import { Link } from '../router'
+import { Link, useRouter } from '../router'
 import '../styles/pages-issues.css'
+
+/**
+ * 平台总览（监控的第一块）。
+ *
+ * 只回答「平台整体怎么样」：任务量、完成率、错误率、耗时、Worker 可用性。
+ * Agent 级拆分在「执行分析」，单次执行的完整轨迹在 Issue 驾驶舱的「记录」。
+ */
 
 const STATUS_META: Record<TaskStatus, { label: string; tone: TagTone }> = {
   pending: { label: '待开始', tone: 'pending' },
@@ -18,16 +25,6 @@ const STATUS_META: Record<TaskStatus, { label: string; tone: TagTone }> = {
 
 /** 「待我处理」：需要人介入的状态（失败重试、Agent 阻塞）。 */
 const ATTENTION_STATUSES: TaskStatus[] = ['failed', 'paused']
-
-/** 失败分类翻译；后端 error_class 是英文枚举。 */
-const FAILURE_LABELS: Record<string, string> = {
-  network: '网络 / 超时',
-  runtime: '运行环境',
-  tool: '工具调用',
-  verification: '验收',
-  permission: '权限',
-  dispatch: '派发',
-}
 
 const RANGES = [7, 30]
 
@@ -42,7 +39,7 @@ function formatTime(value: string): string {
 }
 
 /** 毫秒 → 人话（1.4s / 2m18s）。 */
-function formatMs(ms: number): string {
+export function formatMs(ms: number): string {
   if (!ms || ms < 0) return '—'
   const seconds = ms / 1000
   if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`
@@ -52,10 +49,14 @@ function formatMs(ms: number): string {
 }
 
 /** token 数 → 1.2k / 3.4M。 */
-function formatTokens(n: number): string {
+export function formatTokens(n: number): string {
   if (n < 1000) return String(n)
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
   return `${(n / 1_000_000).toFixed(1)}M`
+}
+
+function percent(ratio: number): string {
+  return `${Math.round(ratio * 1000) / 10}%`
 }
 
 function barHeight(value: number, max: number): string {
@@ -64,7 +65,7 @@ function barHeight(value: number, max: number): string {
 }
 
 /** 每日双序列柱状图（创建 vs 完成）。 */
-function DailyIssuesChart({ created, completed, days }: {
+export function DailyIssuesChart({ created, completed, days }: {
   created: DayCount[]
   completed: DayCount[]
   days: number
@@ -90,7 +91,7 @@ function DailyIssuesChart({ created, completed, days }: {
 }
 
 /** 每日 token 柱状图（输入 vs 输出）。 */
-function DailyTokensChart({ daily, days }: { daily: DayTokens[]; days: number }) {
+export function DailyTokensChart({ daily, days }: { daily: DayTokens[]; days: number }) {
   const max = Math.max(1, ...daily.map((item) => item.input + item.output))
   return (
     <div className="chart" data-testid="chart-tokens">
@@ -111,56 +112,40 @@ function DailyTokensChart({ daily, days }: { daily: DayTokens[]; days: number })
   )
 }
 
-/** 横向排行条（工具调用、失败分类）。 */
-function RankList({ items, empty, labels }: {
-  items: NamedCount[]
-  empty: string
-  labels?: Record<string, string>
-}) {
-  if (!items.length) return <div className="empty-inline">{empty}</div>
-  const max = Math.max(1, ...items.map((item) => item.count))
-  return (
-    <div className="rank-list">
-      {items.map((item) => (
-        <div className="rank-item" key={item.name}>
-          <span className="rank-name">{labels?.[item.name] ?? item.name}</span>
-          <span className="rank-count">
-            {item.count}
-            {item.failed ? <em className="rank-failed">失败 {item.failed}</em> : null}
-          </span>
-          <span className="rank-bar">
-            <span style={{ width: `${(item.count / max) * 100}%` }} />
-          </span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-/** 资源状态：机器在线数。 */
-function MachinesPanel({ machines }: { machines: NamedCount[] }) {
+/** 机器状态 + 在线率。 */
+function MachinesPanel({ machines, availability }: { machines: NamedCount[]; availability: number }) {
   if (!machines.length) {
     return <div className="empty-inline">还没有登记机器</div>
   }
+  const label = (name: string) =>
+    name === 'online' ? '在线' : name === 'offline' ? '离线' : name === 'disabled' ? '已停用' : name
   return (
-    <div className="rank-list">
-      {machines.map((item) => (
-        <div className="rank-item" key={item.name}>
-          <span className="rank-name">
-            <StateDot tone={item.name === 'online' ? 'running' : 'muted'} />
-            {item.name === 'online' ? '在线' : item.name === 'offline' ? '离线' : '已停用'}
-          </span>
-          <span className="rank-count">{item.count}</span>
-        </div>
-      ))}
+    <div className="machine-panel">
+      <div className="machine-availability">
+        <strong>{percent(availability)}</strong>
+        <span>在线率</span>
+      </div>
+      <div className="rank-list">
+        {machines.map((item) => (
+          <div className="rank-item" key={item.name}>
+            <span className="rank-name">
+              <StateDot tone={item.name === 'online' ? 'running' : 'muted'} />
+              {label(item.name)}
+            </span>
+            <span className="rank-count">{item.count}</span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
 
 export default function Dashboard() {
+  const { navigate } = useRouter()
   const [tasks, setTasks] = useState<Task[] | null>(null)
   const [stats, setStats] = useState<StatsOverview | null>(null)
   const [days, setDays] = useState(7)
+  const [issueId, setIssueId] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -182,11 +167,6 @@ export default function Dashboard() {
     void load()
   }, [load])
 
-  const list = tasks ?? []
-  const activeCount = stats?.issues.byStatus.executing ?? list.filter((t) => t.status === 'executing').length
-  const failedCount = stats?.issues.byStatus.failed ?? list.filter((t) => t.status === 'failed').length
-  const completedCount =
-    stats?.issues.byStatus.completed ?? list.filter((t) => t.status === 'completed').length
   const attention = useMemo(
     () => (tasks ?? []).filter((task) => ATTENTION_STATUSES.includes(task.status)).slice(0, 4),
     [tasks],
@@ -203,12 +183,19 @@ export default function Dashboard() {
     [tasks],
   )
 
-  const successRate = stats ? Math.round(stats.runs.successRate * 1000) / 10 : 0
-  const tokens = stats ? stats.tokens.input + stats.tokens.output : 0
+  const openIssue = (event: FormEvent) => {
+    event.preventDefault()
+    const id = issueId.trim()
+    if (!id) return
+    navigate(`/issues/${encodeURIComponent(id)}`)
+  }
+
+  const online = stats?.machines.find((item) => item.name === 'online')?.count ?? 0
+  const machinesTotal = (stats?.machines ?? []).reduce((sum, item) => sum + item.count, 0)
 
   return (
     <AppShell
-      title="任务大盘"
+      title="平台总览"
       breadcrumb="首页"
       actions={
         <div className="button-row">
@@ -255,40 +242,50 @@ export default function Dashboard() {
           <div className="metric-grid">
             <MetricCard
               label="进行中"
-              value={activeCount}
+              value={stats.issues.byStatus.executing ?? 0}
               foot={`全部 ${stats.issues.total} 个 Issue`}
               to="/task/list"
             />
             <MetricCard
               label="上报完成率"
-              value={`${successRate}%`}
+              value={percent(stats.runs.successRate)}
               foot={`${stats.runs.succeeded}/${stats.runs.finished} 轮；只算终态`}
-              to="/task/list"
+            />
+            <MetricCard
+              label="失败率"
+              value={percent(stats.runs.errorRate)}
+              foot={`${stats.runs.failed} 轮失败 · ${stats.runs.cancelled} 轮取消`}
+              urgent={stats.runs.failed > 0}
             />
             <MetricCard
               label="P95 轮时长"
               value={formatMs(stats.runs.p95Ms)}
               foot={`P50 ${formatMs(stats.runs.p50Ms)} · ${stats.runs.finished} 轮`}
             />
-            <MetricCard
-              label={`近 ${days} 天 Token`}
-              value={formatTokens(tokens)}
-              foot={`输入 ${formatTokens(stats.tokens.input)} / 输出 ${formatTokens(stats.tokens.output)}`}
-            />
           </div>
 
           <div className="metric-grid metric-grid-secondary">
-            <MetricCard label="已完成" value={completedCount} foot="Agent 上报完成" to="/task/list" />
-            <MetricCard label="失败" value={failedCount} foot="需要重试或人工处理" to="/task/list" urgent />
             <MetricCard
-              label="工具调用"
-              value={stats.toolsByDay.reduce((sum, item) => sum + item.count, 0)}
-              foot={`近 ${days} 天合计`}
+              label={`近 ${days} 天 Token`}
+              value={formatTokens(stats.tokens.input + stats.tokens.output)}
+              foot={`输入 ${formatTokens(stats.tokens.input)} / 输出 ${formatTokens(stats.tokens.output)}`}
+            />
+            <MetricCard
+              label="Worker 可用性"
+              value={percent(stats.availability)}
+              foot={`${online}/${machinesTotal} 台机器在线`}
+              to="/machines"
             />
             <MetricCard
               label="执行轮次"
               value={stats.runs.total}
-              foot={`进行中 ${(stats.runs.byStatus.dispatched ?? 0) + (stats.runs.byStatus.running ?? 0)} 轮`}
+              foot={`其中 ${stats.runs.retried} 轮非首轮`}
+            />
+            <MetricCard
+              label="已完成"
+              value={stats.issues.byStatus.completed ?? 0}
+              foot="Agent 上报完成"
+              to="/task/list"
             />
           </div>
 
@@ -307,17 +304,17 @@ export default function Dashboard() {
               <DailyIssuesChart created={stats.issues.created} completed={stats.issues.completed} days={days} />
             </section>
 
-            <section className="panel">
+            <section className="panel resource-panel">
               <div className="panel-head">
                 <div>
-                  <h2>失败分类</h2>
-                  <p>按执行侧 error_class 聚合。</p>
+                  <h2>资源状态</h2>
+                  <p>机器在线情况，来自 machines 表。</p>
                 </div>
               </div>
-              <RankList items={stats.failures} empty="窗口内没有失败的轮次" labels={FAILURE_LABELS} />
+              <MachinesPanel machines={stats.machines} availability={stats.availability} />
             </section>
 
-            <section className="panel chart-panel">
+            <section className="panel chart-panel wide">
               <div className="panel-head">
                 <div>
                   <h2>每日 Token</h2>
@@ -331,17 +328,7 @@ export default function Dashboard() {
               <DailyTokensChart daily={stats.tokens.daily} days={days} />
             </section>
 
-            <section className="panel">
-              <div className="panel-head">
-                <div>
-                  <h2>工具调用</h2>
-                  <p>取前 8 名，其余归入「其他」。</p>
-                </div>
-              </div>
-              <RankList items={stats.tools} empty="窗口内没有工具调用" labels={{ unknown: '未知' }} />
-            </section>
-
-            <section className="panel attention-panel">
+            <section className="panel attention-panel wide">
               <div className="panel-head">
                 <div>
                   <h2>待我处理</h2>
@@ -380,22 +367,24 @@ export default function Dashboard() {
               </div>
             </section>
 
-            <section className="panel resource-panel">
-              <div className="panel-head">
-                <div>
-                  <h2>资源状态</h2>
-                  <p>机器在线情况，来自 machines 表。</p>
-                </div>
-              </div>
-              <MachinesPanel machines={stats.machines} />
-            </section>
-
             <section className="panel recent-panel">
               <div className="panel-head">
                 <div>
                   <h2>最近任务</h2>
-                  <p>点击任意任务可恢复到驾驶舱上下文。</p>
+                  <p>点击进入驾驶舱；也可以直接按 Issue ID 打开。</p>
                 </div>
+                <form className="id-jump" onSubmit={openIssue}>
+                  <input
+                    className="input"
+                    placeholder="按 Issue ID 打开执行轨迹"
+                    value={issueId}
+                    onChange={(event) => setIssueId(event.target.value)}
+                    aria-label="Issue ID"
+                  />
+                  <button type="submit" className="button subtle small" disabled={!issueId.trim()}>
+                    打开
+                  </button>
+                </form>
               </div>
               {recent.length ? (
                 <div className="recent-table">

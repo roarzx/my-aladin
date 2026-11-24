@@ -39,9 +39,11 @@ export REDIS_ADDR=127.0.0.1:6379 ALADDIN_ADMIN_TOKEN=devtoken
 
 指标口径、端点与已知限制见 [`docs/monitoring.md`](docs/monitoring.md)：
 
+三个视图：**平台总览**（`/`）、**执行分析**（`/monitor/execution`）、
+**单任务详情**（Issue 驾驶舱「记录」，含排队/执行/收尾耗时分解）。
+
 - `GET /metrics`：Prometheus 文本格式（只出聚合数字，不含 Issue/任务标识）
-- `GET /stats/overview?days=7|30`：前端任务大盘
-- 记录页顶部展示本轮「排队 / 执行 / 收尾」耗时分解
+- `GET /stats/overview?days=7|30`：两个看板页的数据源
 
 ## 评测接入
 

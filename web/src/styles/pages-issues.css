@@ -15,6 +15,7 @@
 
 /* 最近任务铺满整行，避免 6 列在窄列里换行 */
 .recent-panel { grid-column: 1 / -1; }
+.dashboard-grid .wide { grid-column: 1 / -1; }
 
 .metric-grid-secondary { margin-top: 12px; }
 
@@ -281,6 +282,57 @@
 .recent-table .cell-task span { color:var(--faint); font-size: 12px; }
 
 .recent-table .cell-status { display: inline-flex; align-items: center; }
+
+/* 执行分析：Agent / 工具 / token 三张表 */
+.recent-table .table-row.agent-row {
+  grid-template-columns: 1.3fr 1.1fr 0.7fr 0.7fr 1fr 0.5fr 1fr 1fr;
+}
+
+.recent-table .table-row.tool-row {
+  grid-template-columns: 1.4fr 0.8fr 0.8fr 0.8fr 0.8fr;
+}
+
+.recent-table .table-row.token-row {
+  grid-template-columns: 2fr 1fr 1fr;
+}
+
+.cell-sub {
+  display: block;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.cell-danger { color: var(--red); }
+
+.panel-hint {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+/* 平台总览：机器可用性 */
+.machine-panel { display: grid; gap: 12px; }
+
+.machine-availability {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.machine-availability strong {
+  color: var(--green);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.machine-availability span { color: var(--muted); font-size: 12px; }
+
+/* 按 Issue ID 打开 */
+.id-jump { display: flex; gap: 8px; align-items: center; }
+.id-jump .input { width: 240px; }
 
 /* ---------- Issue 列表 ---------- */
 

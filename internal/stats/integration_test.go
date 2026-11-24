@@ -141,13 +141,13 @@ func TestOverviewAggregatesRunsAndUsage(t *testing.T) {
 		t.Fatalf("Issue 总数 = %d，表里是 %d", after.Issues.Total, dbTotal)
 	}
 
-	toolCount := func(overview stats.Overview, name string) stats.NamedCount {
+	toolCount := func(overview stats.Overview, name string) stats.ToolStat {
 		for _, item := range overview.Tools {
 			if item.Name == name {
 				return item
 			}
 		}
-		return stats.NamedCount{}
+		return stats.ToolStat{}
 	}
 	if got := toolCount(after, "ls").Count - toolCount(before, "ls").Count; got != 3 {
 		t.Fatalf("ls 调用差值 = %d", got)

@@ -189,3 +189,15 @@ export function IconSun(props: IconProps) {
     </svg>
   )
 }
+
+export function IconChart(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M4 20V4" />
+      <path d="M4 20h16" />
+      <rect x="7.5" y="12" width="3" height="5" rx="1" />
+      <rect x="13" y="8" width="3" height="9" rx="1" />
+      <rect x="18" y="4.5" width="2.5" height="12.5" rx="1" />
+    </svg>
+  )
+}

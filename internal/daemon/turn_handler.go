@@ -351,6 +351,12 @@ func handleTool(tools map[string]*toolState, emitWork func(string, map[string]an
 		status = "completed"
 	}
 	delete(tools, event.ToolCallID)
+	if state.title == "" && state.kind == "" {
+		// session/load 之后适配器会把上一轮的工具调用重放一遍，这些帧只有
+		// tool_call_id、没有标题。它们不是本轮的新调用，丢弃，否则记录页与
+		// 监控会把旧调用再算一遍。
+		return
+	}
 	payload := map[string]any{
 		"tool_call_id": event.ToolCallID,
 		"title":        state.title,
