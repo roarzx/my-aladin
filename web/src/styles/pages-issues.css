@@ -16,6 +16,165 @@
 /* 最近任务铺满整行，避免 6 列在窄列里换行 */
 .recent-panel { grid-column: 1 / -1; }
 
+.metric-grid-secondary { margin-top: 12px; }
+
+/* ---------- 本轮耗时分解 ---------- */
+
+.run-breakdown {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.run-breakdown-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.run-breakdown-head .muted { font-size: 12px; }
+
+.run-breakdown-bar {
+  display: flex;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--line);
+}
+
+.rb-seg { display: inline-block; height: 100%; }
+.rb-seg.queue { background: var(--faint); }
+.rb-seg.exec { background: var(--blue); }
+.rb-seg.tail { background: var(--green); }
+
+.run-breakdown-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.run-breakdown-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 2px;
+}
+
+/* ---------- 监控图表 ---------- */
+
+.chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 150px;
+  padding-top: 8px;
+}
+
+.chart-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chart-bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  height: 120px;
+}
+
+.chart-bar {
+  width: 7px;
+  border-radius: 2px 2px 0 0;
+  background: var(--blue);
+}
+
+.chart-bar.bar-done { background: var(--green); }
+.chart-bar.bar-output { background: var(--cyan); }
+
+.chart-x {
+  font-size: 10px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.chart-legend {
+  display: flex;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chart-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-radius: 2px;
+  background: var(--blue);
+}
+
+.chart-legend i.bar-done { background: var(--green); }
+.chart-legend i.bar-output { background: var(--cyan); }
+
+.rank-list { display: grid; gap: 10px; }
+
+.rank-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.rank-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank-name .state-dot { margin-right: 6px; }
+
+.rank-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rank-failed {
+  margin-left: 8px;
+  color: var(--red);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.rank-bar {
+  grid-column: 1 / -1;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--line);
+}
+
+.rank-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--blue);
+}
+
 .dashboard-error {
   display: flex;
   align-items: center;

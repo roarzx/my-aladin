@@ -26,6 +26,7 @@ export default defineConfig({
       '/machines': apiTarget,
       '/agents': apiTarget,
       '/repositories': apiTarget,
+      '/stats': apiTarget,
     },
   },
   test: {

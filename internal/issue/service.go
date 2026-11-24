@@ -241,12 +241,24 @@ func (s *Service) ApplyTurnDone(ctx context.Context, executionID string, data ma
 		domain.RunCompleted, reply, "", ""); err != nil {
 		return err
 	}
+	// 用量快照：统计与看板直接按列聚合，不再反解活动 JSON。
+	model := ""
+	if run.AgentID != "" {
+		if agent, err := mysqlstore.GetAgent(ctx, s.DB, run.AgentID); err == nil {
+			model = agent.Model
+		}
+	}
+	if err := mysqlstore.SetIssueRunUsage(ctx, s.DB, run.ID,
+		int64(intField(data, "input_tokens")), int64(intField(data, "output_tokens")),
+		model); err != nil {
+		s.log().Warn("写入执行用量失败", "run", run.ID, "err", err)
+	}
 	if acpID := stringField(data, "acp_session_id"); acpID != "" && run.SessionID != "" {
 		if err := mysqlstore.SetSessionACPID(ctx, s.DB, run.SessionID, acpID, ""); err != nil {
 			s.log().Warn("保存 ACP 会话失败", "session", run.SessionID, "err", err)
 		}
 	}
-	// 过程说明先落库：会话页把它折叠在回复气泡上方。
+	// 过程说明先落库：它属于执行过程，展示在记录页。
 	if narration := stringField(data, "narration"); narration != "" {
 		_, _ = mysqlstore.AppendActivity(ctx, s.DB, run.TaskID, "agent.narration", map[string]any{
 			"text": narration, "run_id": run.ID,

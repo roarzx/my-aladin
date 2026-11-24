@@ -121,6 +121,17 @@ func FinishIssueRun(ctx context.Context, ex Executor, id string, from []domain.R
 	return affected > 0, nil
 }
 
+// SetIssueRunUsage 写入这一轮的 token 用量与模型快照。
+func SetIssueRunUsage(ctx context.Context, ex Executor, id string, input, output int64, model string) error {
+	_, err := ex.ExecContext(ctx, `UPDATE issue_runs
+		SET input_tokens = ?, output_tokens = ?, model = NULLIF(?, '')
+		WHERE id = ?`, input, output, model, id)
+	if err != nil {
+		return fmt.Errorf("写入执行用量: %w", err)
+	}
+	return nil
+}
+
 // MarkRunning 把 dispatched 的执行推进为 running（首帧事件到达时）。
 func MarkRunning(ctx context.Context, ex Executor, executionID string) error {
 	_, err := ex.ExecContext(ctx,
@@ -134,7 +145,7 @@ func MarkRunning(ctx context.Context, ex Executor, executionID string) error {
 
 const issueRunColumns = `id, task_id, agent_id, COALESCE(session_id, ''), execution_id,
 	status, COALESCE(reply, ''), COALESCE(error_class, ''), COALESCE(detail, ''),
-	created_at, updated_at`
+	input_tokens, output_tokens, COALESCE(model, ''), created_at, updated_at`
 
 func scanIssueRun(row rowScanner) (domain.IssueRun, error) {
 	var (
@@ -142,7 +153,8 @@ func scanIssueRun(row rowScanner) (domain.IssueRun, error) {
 		status string
 	)
 	err := row.Scan(&run.ID, &run.TaskID, &run.AgentID, &run.SessionID, &run.ExecutionID,
-		&status, &run.Reply, &run.ErrorClass, &run.Detail, &run.CreatedAt, &run.UpdatedAt)
+		&status, &run.Reply, &run.ErrorClass, &run.Detail,
+		&run.InputTokens, &run.OutputTokens, &run.Model, &run.CreatedAt, &run.UpdatedAt)
 	if err != nil {
 		return domain.IssueRun{}, err
 	}

@@ -35,6 +35,14 @@ export REDIS_ADDR=127.0.0.1:6379 ALADDIN_ADMIN_TOKEN=devtoken
 ./bin/server
 ```
 
+## 监控
+
+指标口径、端点与已知限制见 [`docs/monitoring.md`](docs/monitoring.md)：
+
+- `GET /metrics`：Prometheus 文本格式（只出聚合数字，不含 Issue/任务标识）
+- `GET /stats/overview?days=7|30`：前端任务大盘
+- 记录页顶部展示本轮「排队 / 执行 / 收尾」耗时分解
+
 ## 评测接入
 
 SWE-bench Verified 式接入的 MVP 见 [`evals/README.md`](evals/README.md)：

@@ -33,6 +33,7 @@ import (
 	"github.com/roarzx/my-aladin/internal/observability"
 	"github.com/roarzx/my-aladin/internal/session"
 	"github.com/roarzx/my-aladin/internal/squadrunner"
+	"github.com/roarzx/my-aladin/internal/stats"
 	mysqlstore "github.com/roarzx/my-aladin/internal/store/mysql"
 	"github.com/roarzx/my-aladin/internal/task"
 	"github.com/roarzx/my-aladin/internal/transport/ws"
@@ -145,6 +146,7 @@ func run(cfgPath string) error {
 	hub.OnEvent = (&issue.EventHandler{Service: issueService, Log: slog.Default()}).Handle
 
 	activityHandler := &activity.Handler{DB: db, Members: &mysqlstore.WorkspaceStore{DB: db}}
+	statsHandler := &stats.Handler{Service: stats.New(db)}
 	taskHandler := &task.Handler{Service: taskService, DB: db, Members: &mysqlstore.WorkspaceStore{DB: db}}
 	artifactService := &artifact.Service{
 		DB: db, Root: cfg.Storage.ArtifactRoot, Log: slog.Default(),
@@ -194,6 +196,8 @@ func run(cfgPath string) error {
 		Ready:         readyHandler,
 		MountRoot: func(r chi.Router) {
 			r.Handle(cfg.Server.WSPath, wsServer)
+			// Prometheus 抓取端点：只出聚合数字，不含 Issue/任务标识。
+			r.Get("/metrics", statsHandler.Metrics)
 			r.Route("/api/v1/cli", func(r chi.Router) {
 				r.Use(httpapi.MachineAuth(machineAuthenticator))
 				httpapi.MountCLI(r, &contextStore{db: db})
@@ -229,6 +233,7 @@ func run(cfgPath string) error {
 			r.Get("/issues/{id}/events", activityHandler.List)
 			r.Get("/issues/{id}/artifacts", artifactHandler.List)
 			r.Get("/issues/{id}/artifacts/{artifactId}/content", artifactHandler.Download)
+			r.Get("/stats/overview", statsHandler.Overview)
 		},
 		RegisterWorkspace: func(r chi.Router) {
 			r.With(auth.RequireAction(auth.ActionCreateIssue, nil)).

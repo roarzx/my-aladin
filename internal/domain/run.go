@@ -27,6 +27,10 @@ type IssueRun struct {
 	Reply       string    `json:"reply,omitempty"`
 	ErrorClass  string    `json:"errorClass,omitempty"`
 	Detail      string    `json:"detail,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	// 用量快照：由 turn_done 回填，供统计与看板使用。
+	InputTokens  int64     `json:"inputTokens"`
+	OutputTokens int64     `json:"outputTokens"`
+	Model        string    `json:"model,omitempty"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }

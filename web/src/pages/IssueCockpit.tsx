@@ -11,6 +11,7 @@ import {
   type EventPage,
   type IssueDetail,
   type IssueRun,
+  type StreamEvent,
   type TaskStatus,
 } from '../api/issues'
 import AppShell from '../components/AppShell'
@@ -188,6 +189,84 @@ function buildThread(events: { seq: number; eventId: string; kind: string; paylo
     }
   }
   return items
+}
+
+/** 毫秒 → 人话（1.4s / 2m18s）。 */
+function formatMs(ms: number): string {
+  if (!ms || ms < 0) return '0s'
+  const seconds = ms / 1000
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}m${String(Math.round(seconds % 60)).padStart(2, '0')}s`
+}
+
+/**
+ * 一轮的耗时分解：排队（派发→开跑）→ 执行（Agent）→ 收尾（回执→落库）。
+ *
+ * 数据全部来自已有事件，不依赖任何外部追踪系统；这是回答「时间花在哪」
+ * 的最小闭环。
+ */
+function RunBreakdown({ run, events }: { run: IssueRun; events: StreamEvent[] }) {
+  const runEvents = events.filter((event) => str(payloadOf(event).run_id) === run.id)
+  const started = runEvents.find((event) => event.kind === 'turn.started')
+  if (!started) return null
+  const finished = runEvents.find((event) => event.kind === 'turn.done')
+
+  const startedAt = new Date(started.createdAt).getTime()
+  const doneAt = finished ? new Date(finished.createdAt).getTime() : 0
+  const queueMs = Math.max(0, startedAt - new Date(run.createdAt).getTime())
+  const execMs = doneAt ? Math.max(0, doneAt - startedAt) : 0
+  const tailMs = doneAt ? Math.max(0, new Date(run.updatedAt).getTime() - doneAt) : 0
+  const total = queueMs + execMs + tailMs || 1
+
+  const tools = runEvents.filter((event) => event.kind === 'tool.call')
+  const failed = tools.filter((event) => str(payloadOf(event).status) === 'failed').length
+  const slowest = tools.reduce(
+    (best, event) => {
+      const ms = Number(payloadOf(event).duration_ms) || 0
+      return ms > best.ms ? { ms, title: str(payloadOf(event).title) } : best
+    },
+    { ms: 0, title: '' },
+  )
+
+  const segments: Array<{ key: string; label: string; ms: number }> = [
+    { key: 'queue', label: '排队', ms: queueMs },
+    { key: 'exec', label: '执行', ms: execMs },
+    { key: 'tail', label: '收尾', ms: tailMs },
+  ]
+
+  return (
+    <div className="run-breakdown" data-testid="run-breakdown">
+      <div className="run-breakdown-head">
+        <strong>本轮耗时</strong>
+        <span className="muted">
+          {tools.length} 次工具调用
+          {failed ? ` · ${failed} 次失败` : ''}
+          {slowest.ms ? ` · 最慢 ${slowest.title || '工具'} ${formatMs(slowest.ms)}` : ''}
+        </span>
+      </div>
+      <div className="run-breakdown-bar">
+        {segments.map((segment) =>
+          segment.ms > 0 ? (
+            <span
+              key={segment.key}
+              className={`rb-seg ${segment.key}`}
+              style={{ width: `${(segment.ms / total) * 100}%` }}
+              title={`${segment.label} ${formatMs(segment.ms)}`}
+            />
+          ) : null,
+        )}
+      </div>
+      <div className="run-breakdown-legend">
+        {segments.map((segment) => (
+          <span key={segment.key}>
+            <i className={`rb-seg ${segment.key}`} />
+            {segment.label} {formatMs(segment.ms)}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function ThreadBubble({
@@ -438,6 +517,7 @@ export default function IssueCockpit({ taskId, api, eventsFetcher }: IssueCockpi
         {tab === 'records' ? (
           <div className="cockpit-shell">
             <div className="thread records" data-testid="records-pane">
+              {latestRun ? <RunBreakdown run={latestRun} events={stream.events} /> : null}
               <AuditTimeline events={stream.events} connected={stream.connected} />
             </div>
           </div>
