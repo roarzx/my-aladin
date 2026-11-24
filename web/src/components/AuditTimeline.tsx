@@ -65,11 +65,6 @@ function num(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
-function clipText(value: string, limit: number): string {
-  const runes = Array.from(value)
-  return runes.length <= limit ? value : `${runes.slice(0, limit).join('')}…`
-}
-
 function formatTime(value: string): string {
   const date = new Date(value || 0)
   if (Number.isNaN(date.getTime())) return ''
@@ -281,7 +276,8 @@ function eventDetail(event: StreamEvent): ReactNode {
     case 'agent.notice':
       return text(payload.text)
     case 'agent.narration':
-      return <span className="audit-note">{clipText(text(payload.text), 140)}</span>
+      // 过程叙述是记录页的主角，原文展示（过长由 CSS 限制高度滚动）。
+      return <span className="audit-narration">{text(payload.text)}</span>
     default:
       return ''
   }

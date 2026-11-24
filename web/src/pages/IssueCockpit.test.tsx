@@ -185,14 +185,14 @@ describe('IssueCockpit', () => {
     expect(await screen.findByTestId('thread-status')).toHaveTextContent('执行中 → 已完成')
   })
 
-  it('过程叙述折叠起来，只把结论放在气泡里', async () => {
+  it('过程叙述不放进会话气泡，只留在记录里', async () => {
     const page: EventPage = {
       events: [
         {
           seq: 1,
           eventId: 'n1',
           kind: 'agent.narration',
-          payload: { text: 'Let me read the file.\n\nNow let me fix it.', run_id: 'run-1' },
+          payload: { text: 'Let me read the file first.', run_id: 'run-1' },
           createdAt: '2026-01-01T00:01:00Z',
         },
         {
@@ -205,13 +205,17 @@ describe('IssueCockpit', () => {
       ],
       nextSeq: 2,
     }
+    const user = userEvent.setup()
     renderCockpit({ taskId: 'task-1', api: makeApi(), eventsFetcher: streamOf([page]) })
 
-    const fold = await screen.findByTestId('thread-narration')
-    expect(fold).toHaveTextContent('执行过程（2 段）')
-    expect(fold).not.toHaveAttribute('open')
-    expect(screen.getByTestId('thread-assistant')).toContainElement(fold)
+    // 会话气泡只有结论。
     expect(await screen.findByText('修好了，测试通过。')).toBeInTheDocument()
+    expect(screen.queryByText(/Let me read the file first/)).not.toBeInTheDocument()
+
+    // 过程叙述留在记录页。
+    await user.click(screen.getByRole('tab', { name: '记录' }))
+    expect(await screen.findByText('执行过程')).toBeInTheDocument()
+    expect(screen.getByText('Let me read the file first.')).toBeInTheDocument()
   })
 
   it('记录页按 seq 增量合并，重复 eventId 不重复渲染', async () => {
