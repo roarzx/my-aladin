@@ -31,6 +31,12 @@ func (h *EventHandler) Handle(ctx context.Context, _ string, env protocol.Envelo
 		_ = json.Unmarshal(payload.Data, &data)
 	}
 	switch payload.Kind {
+	case "":
+		// 流式帧没有 kind：用它把执行从 dispatched 推进到 running，
+		// 否则整轮跑完前页面一直显示「已派发」。
+		if env.Type == protocol.TypeStream {
+			h.Service.MarkRunning(ctx, env.ExecutionID)
+		}
 	case "turn_done":
 		return h.Service.ApplyTurnDone(ctx, env.ExecutionID, data)
 	case "turn_fail":

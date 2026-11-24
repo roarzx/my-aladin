@@ -32,7 +32,37 @@ meta.json            镜像 / base commit / issue id / 补丁字节数
 instruction.md       实际喂给 Agent 的原文
 ```
 
-判分不在本仓库：交给 Harbor 或官方 harness，见 `verify.sh`。
+判分交给 `verify.sh`（有 Harbor 任务目录时在干净容器里按官方规则跑）：
+
+```bash
+./evals/swebench/verify.sh --job sympy-20590-local \
+  --task /path/to/swebench/tasks/sympy__sympy-20590
+```
+
+## 实测：sympy__sympy-20590
+
+2026-11-24 在本机（Apple Silicon，amd64 镜像走 QEMU）跑通：
+
+| 指标 | 值 |
+|---|---|
+| reward | **1**（`resolved: true`） |
+| FAIL_TO_PASS | 1 / 1（`test_immutable`） |
+| PASS_TO_PASS | 21 / 21 |
+| 交付补丁 | 1207 字节，`_print_helpers.py` 加 `__slots__ = ()`（另加的自测文件不影响判分） |
+| Agent 执行 | 994 秒（同题官方基线的原生 amd64 环境约 213 秒） |
+| 判分 | 全新容器、`--network none`、独立 `tests/verify.py` |
+
+证据（未入库，`evals/jobs/` 已 gitignore）：`agent-patch.diff`、`issue-events.json`、
+`runs.json`、`daemon.log`、`meta.json`、`verifier/verification.json`。
+
+踩到的两个坑，都已写进镜像与脚本：
+
+1. **ACP Agent 必须带 optional 依赖安装**（`npm install -g` 不带 `--omit=optional`），
+   否则 `@anthropic-ai/claude-agent-sdk` 缺 linux-x64 的 Claude Code 原生二进制，
+   报 `Claude native binary not found for linux-x64`。
+2. **模型入口**：宿主机上的代理只监听 `127.0.0.1`，容器仍可通过
+   `host.docker.internal` 访问（Docker Desktop 会代理到宿主 loopback）。
+   `run-instance.sh` 会把调用方 shell 里的 `ANTHROPIC_*` / `CLAUDE_CODE_*` 透传进容器。
 
 ## evalMode 做了什么
 
@@ -81,10 +111,10 @@ Agent 配置上的 `evalMode: true`（`agents.eval_mode`）会改变三件事：
 
 ```
 evals/swebench/
-  Dockerfile            题目镜像：官方 swebench 镜像 + aladdin + ACP Agent
+  Dockerfile            题目镜像：官方 swebench 镜像 + Node + aladdin + ACP Agent
   daemon-entrypoint.sh  容器入口：把 daemon 接到控制面
   run-instance.sh       一个实例的端到端执行
-  verify.sh             判分入口（委托 Harbor / 打印六步配方）
+  verify.sh             判分入口（干净容器里跑官方 verify.py）
   agent.example.yaml    机器 / Agent / Issue 参数
   .build/               构建产物（aladdin 二进制，已 gitignore）
 ```

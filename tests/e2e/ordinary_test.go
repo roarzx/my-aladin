@@ -327,3 +327,27 @@ func TestEvalModePausesAfterTurn(t *testing.T) {
 		t.Fatalf("评测轮结束后应为 paused（等待验收），实际 %q", got)
 	}
 }
+
+func TestStreamMarksRunRunning(t *testing.T) {
+	env := setupIssue(t)
+	ctx := context.Background()
+	taskID := env.createIssue(t, "流式帧")
+	run, err := env.service.StartTurn(ctx, taskID, "开始")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload, _ := json.Marshal(protocol.StreamPayload{Delta: "第一段"})
+	frame := protocol.Envelope{Type: protocol.TypeStream, ExecutionID: run.ExecutionID, Payload: payload}
+	if err := env.events.Handle(context.Background(), "machine-e2e", frame); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := mysqlstore.GetIssueRunByExecution(ctx, env.db, run.ExecutionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != domain.RunRunning {
+		t.Fatalf("收到流式帧后执行状态 = %q，期望 running", got.Status)
+	}
+}

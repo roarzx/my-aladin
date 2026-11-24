@@ -80,7 +80,10 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o evals/swebench/.build/aladdin 
 
 log "构建镜像 $IMAGE"
 docker build -f evals/swebench/Dockerfile --platform "$PLATFORM" \
-  --build-arg "BASE_IMAGE=$IMAGE" -t "aladdin-eval:$(echo "$INSTANCE" | tr -cd 'a-z0-9-')" .
+  --build-arg "BASE_IMAGE=$IMAGE" \
+  --build-arg "BASE_COMMIT=$BASE_COMMIT" \
+  ${AGENT_VERSION:+--build-arg "AGENT_VERSION=$AGENT_VERSION"} \
+  -t "aladdin-eval:$(echo "$INSTANCE" | tr -cd 'a-z0-9-')" .
 
 # ---------- 2. 机器 / Agent ----------
 if [[ -z "$WORKSPACE_ID" ]]; then
@@ -131,9 +134,16 @@ cleanup() {
 trap cleanup EXIT
 
 log "启动容器 $CONTAINER"
+# 模型入口：把调用方 shell 里的 ANTHROPIC_* / CLAUDE_CODE_* 透传进容器。
+MODEL_ENV=()
+while IFS= read -r name; do
+  [[ -n "${!name:-}" ]] && MODEL_ENV+=(-e "$name=${!name}")
+done < <(compgen -e | grep -E '^(ANTHROPIC_|CLAUDE_CODE_)' || true)
+
 docker run -d --name "$CONTAINER" \
   --platform "$PLATFORM" \
   --add-host host.docker.internal:host-gateway \
+  "${MODEL_ENV[@]}" \
   -e "ALADDIN_MACHINE_ID=$MACHINE_ID" \
   -e "ALADDIN_MACHINE_TOKEN=$MACHINE_TOKEN" \
   -e "ALADDIN_API_URL=http://host.docker.internal:${API##*:}" \
@@ -177,6 +187,7 @@ run_status=""
 while [[ $(date +%s) -lt $deadline ]]; do
   run_status=$(curl -sS -H "Authorization: Bearer $ALADDIN_ADMIN_TOKEN" \
     "$API/issues/$ISSUE_ID/runs" | jget '(d["data"][0]["status"] if d.get("data") else "")')
+  # dispatched/running 都算「还在跑」；evalMode 下单轮上限是 4 小时。
   case "$run_status" in
     completed|failed|cancelled) break ;;
   esac
